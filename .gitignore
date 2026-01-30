@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Sessions and Credentials
+*.session
+*.session-journal
+.env
+
+# Project specific
+replicator_session.session
+replicator_session.session-journal

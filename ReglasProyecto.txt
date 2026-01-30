@@ -1,0 +1,64 @@
+🔹 PROMPT PARA ANTIGRAVITI
+
+Objetivo del sistema
+Diseñar una automatización inteligente que detecte mensajes entrantes en un grupo de Telegram de origen (con reenvío bloqueado) y replique el contenido en tiempo real hacia un grupo de Telegram destino, donde el usuario es administrador, publicando el mensaje como contenido nuevo sin usar el forward nativo de Telegram.
+
+Descripción de la automatización
+El sistema debe escuchar continuamente los mensajes nuevos que llegan al grupo origen de Telegram mediante una cuenta real (no bot).
+Cuando se detecta un nuevo mensaje, la automatización debe:
+
+Analizar el tipo de contenido recibido:
+
+Texto
+
+Imagen
+
+Texto + imagen
+
+Extraer el contenido visible del mensaje.
+
+Replicar el contenido como un mensaje nuevo en el grupo destino de Telegram.
+
+Ejecutar la acción con la menor latencia posible (tiempo casi real).
+
+Evitar el uso de la funcionalidad de “reenviar” de Telegram para cumplir con restricciones de mensajes protegidos.
+
+Tecnologías a utilizar
+
+Lenguaje principal: Python
+
+Librería de Telegram: Telethon (uso de cuenta real para lectura de mensajes)
+
+Arquitectura de automatización:
+
+Antigraviti como orquestador del flujo y control de eventos
+
+Agentes o workers para escucha y publicación de mensajes
+
+Ejecución:
+
+VPS o servidor persistente (Linux recomendado)
+
+Gestión de sesiones:
+
+Sesión autenticada de Telegram (StringSession o archivo .session)
+
+Opcional (escalabilidad):
+
+Docker para contenerización
+
+Logs y monitoreo de eventos
+
+Restricciones y consideraciones
+
+No utilizar bots de Telegram para la lectura del grupo origen.
+
+Respetar los límites de frecuencia para evitar restricciones de la cuenta.
+
+El sistema debe funcionar aunque el grupo origen tenga el reenvío bloqueado.
+
+El mensaje publicado en el grupo destino debe aparecer como contenido original.
+
+Resultado esperado
+
+Un sistema automatizado, estable y escalable que replique señales o mensajes desde un grupo de Telegram a otro en tiempo casi real, sin marcas de reenvío y sin intervención manual.
