@@ -11,39 +11,46 @@ load_dotenv()
 API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
 SESSION_NAME = os.getenv('SESSION_NAME', 'replicator_session')
-SOURCE_CHANNEL = os.getenv('SOURCE_CHANNEL_ID')
 DEST_CHANNEL = os.getenv('DESTINATION_CHANNEL_ID')
 
+# --- SOURCE CONFIGURATION (ID -> Priority) ---
+# 1 = Highest, 4 = Lowest
+SOURCE_MAP = {
+    -1002148227049: 1,  # GTS VIP
+    -1002310215234: 2,  # 44's Clup
+    -1002108856565: 3,  # Gold Trader Sunny
+    -1003020297428: 4   # FXKINGS SIGNALS
+}
+
 def parse_channel_id(val):
-    """Helper to convert string IDs to integers if they look like numbers."""
-    if not val:
-        return None
+    if not val: return None
     try:
         return int(val)
     except ValueError:
-        return val  # Return as string (username)
+        return val
 
 async def main():
     if not API_ID or not API_HASH:
         print("Error: API_ID and API_HASH missing in .env")
         return
 
-    if not SOURCE_CHANNEL or not DEST_CHANNEL:
-        print("Error: SOURCE_CHANNEL_ID and DESTINATION_CHANNEL_ID must be set in .env")
+    if not DEST_CHANNEL:
+        print("Error: DESTINATION_CHANNEL_ID must be set in .env")
         return
 
-    # Convert IDs if needed
-    src = parse_channel_id(SOURCE_CHANNEL)
     dst = parse_channel_id(DEST_CHANNEL)
 
-    print("Starting Telegram Replicator Service...")
+    print("Starting Antigraviti Multi-Source System...")
+    print(f"Sources Configured: {len(SOURCE_MAP)}")
+    for sid, prio in SOURCE_MAP.items():
+        print(f" - Source {sid}: Priority {prio}")
     
     # Initialize Client
     client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
     
     await client.start()
     
-    replicator = TelegramReplicator(client, src, dst)
+    replicator = TelegramReplicator(client, SOURCE_MAP, dst)
     await replicator.start()
 
 if __name__ == '__main__':

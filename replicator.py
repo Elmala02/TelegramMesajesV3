@@ -1,205 +1,330 @@
 import os
 import logging
-import emoji
 import re
+import json
+import asyncio
+from datetime import datetime, timedelta
+import pytz
+import httpx
 from telethon import TelegramClient, events
 from telethon.tl.types import Message
-from deep_translator import GoogleTranslator
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("debug_replicator.log"),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
+class SignalStateManager:
+    """Manages state for logical filters (Conflicts, Duplicates, Priorities)."""
+    def __init__(self, state_file="signal_state.json"):
+        self.state_file = state_file
+        self.active_signals = [] # List of dicts: {asset, direction, entry, priority, timestamp}
+        self.load_state()
+
+    def load_state(self):
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    self.active_signals = json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading state: {e}")
+            self.active_signals = []
+
+    def save_state(self):
+        try:
+            # Prune old signals (> 24 hours)
+            cutoff = datetime.now(pytz.UTC) - timedelta(hours=24)
+            self.active_signals = [
+                s for s in self.active_signals 
+                if datetime.fromisoformat(s['timestamp']) > cutoff
+            ]
+            with open(self.state_file, 'w') as f:
+                json.dump(self.active_signals, f, indent=4)
+        except Exception as e:
+            logger.error(f"Error saving state: {e}")
+
+    def check_duplicate(self, asset, direction, entry):
+        """
+        Returns True if EXACTLY the same signal (same asset, same dir) 
+        was posted recently (last 2 hours), REGARDLESS of priority.
+        If it's a re-post, we ignore it.
+        """
+        if not asset or not direction: return False 
+
+        now = datetime.now(pytz.UTC)
+        cutoff = now - timedelta(hours=2)
+
+        for signal in self.active_signals:
+            sig_time = datetime.fromisoformat(signal['timestamp'])
+            if sig_time > cutoff and signal['asset'] == asset and signal['direction'] == direction:
+                # Same signal recently?
+                return True
+        return False
+
+    def check_priority_conflict(self, asset, new_priority):
+        """
+        Resolves conflict based on Priority.
+        Returns:
+            allowed (bool): If True, proceed. If False, block.
+            action (str): 'NEW' (no conflict), 'REPLACE' (override old), 'BLOCK' (low priority)
+        """
+        if not asset: return True, 'NEW'
+
+        now = datetime.now(pytz.UTC)
+        cutoff = now - timedelta(hours=4) # Active window
+        
+        # Sort signals by time (newest first) to find the current active one for this asset
+        relevant_signals = [
+            s for s in self.active_signals 
+            if s['asset'] == asset and datetime.fromisoformat(s['timestamp']) > cutoff
+        ]
+        
+        if not relevant_signals:
+            return True, 'NEW'
+
+        # Get latest active signal for this asset
+        # (Assuming the list maintenance keeps it reasonably clean, or we just take the last one)
+        latest_signal = relevant_signals[-1] 
+        old_priority = latest_signal.get('priority', 99) # Default to low priority if unknown
+
+        logger.info(f"Priority Check: Asset={asset}, NewPrio={new_priority}, OldPrio={old_priority}")
+
+        if new_priority < old_priority:
+            # New message is HIGHER priority (lower number). OVERRIDE.
+            return True, 'REPLACE'
+        elif new_priority > old_priority:
+            # New message is LOWER priority. BLOCK.
+            return False, 'BLOCK'
+        else:
+            # Equal priority. Usually treat as conflict if direction opposes, but 
+            # if we are here, we might have passed duplicates check. 
+            # If direction is different and priority equal -> Conflict -> Block (per Rule 2.1)
+            return False, 'BLOCK'
+
+    def update_signal(self, asset, direction, priority):
+        """Adds new signal, removing conflicting ones for the same asset to keep state clean."""
+        # Remove active signals for this asset (Logic: One active signal per asset per time window)
+        # Or better: Just append the new one, and `check_priority_conflict` logic looks at the latest.
+        # Let's prune old ones for this asset to "replace" it.
+        self.active_signals = [s for s in self.active_signals if s['asset'] != asset]
+        
+        self.active_signals.append({
+            "asset": asset,
+            "direction": direction,
+            "priority": priority,
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        })
+        self.save_state()
+
 class TelegramReplicator:
-    def __init__(self, client: TelegramClient, source_id, destination_id):
+    def __init__(self, client: TelegramClient, source_map, destination_id):
         self.client = client
-        self.source_id = source_id
+        self.source_map = source_map # Dict {id: priority}
         self.destination_id = destination_id
         
-        # Load filtering config
-        self.keywords = [k.strip().upper() for k in os.getenv('KEYWORDS', 'BUY,SELL,TP,SL,ENTRY,STOP,CLOSE,LIMIT').split(',')]
-        self.promo_triggers = [p.strip().lower() for p in os.getenv('PROMO_TRIGGERS', 'promoción,promo,promocion,publicidad,síguenos,canal,link,@,comments,profits').split(',')]
-        self.block_keywords = [b.strip().upper() for b in os.getenv('BLOCK_KEYWORDS', 'VIP,team,smashed,meanwhile,message👇,profits').split(',')]
+        self.state_manager = SignalStateManager()
         
-        # Translation config
-        self.enable_translation = os.getenv('ENABLE_TRANSLATION', 'False').lower() == 'true'
-        self.translator = GoogleTranslator(source='auto', target='es')
+        self.promo_triggers = [
+            "promo", "promoción", "promocion", "canal", "únete", "link", 
+            "publicidad", "siguenos", "síguenos", "contact", "@", "vip"
+        ]
+        
+        self.ai_api_url = os.getenv('AI_API_URL', 'https://apifreellm.com/api/v1/chat')
+        self.ai_api_key = os.getenv('AI_API_KEY', '')
 
     async def start(self):
-        """Starts the replicator listener."""
+        """Starts listeners for all source channels."""
+        source_ids = list(self.source_map.keys())
+        logger.info(f"Listening on sources: {source_ids} -> Destination: {self.destination_id}")
         
-        # Verify access to channels
+        # Verify Destination
         try:
-            logger.info(f"Verifying access to Source: {self.source_id}")
-            source_entity = await self.client.get_entity(self.source_id)
-            logger.info(f"Source confirmed: {getattr(source_entity, 'title', source_entity)}")
-
-            logger.info(f"Verifying access to Destination: {self.destination_id}")
-            dest_entity = await self.client.get_entity(self.destination_id)
-            logger.info(f"Destination confirmed: {getattr(dest_entity, 'title', dest_entity)}")
-            
-            # Store resolved entities to avoid repeated lookups
-            self.source_entity = source_entity
-            self.dest_entity = dest_entity
-            
+            self.dest_entity = await self.client.get_entity(self.destination_id)
         except Exception as e:
-            logger.error(f"Failed to access channels: {e}")
-            logger.error("Please double-check your channel IDs/Usernames in .env and ensure the account joined them.")
+            logger.error(f"Destination Channel Error: {e}")
             return
 
-        @self.client.on(events.NewMessage(chats=self.source_id))
+        # Listen to ALL source channels
+        @self.client.on(events.NewMessage(chats=source_ids))
         async def handler(event):
-            await self.process_message(event.message)
+            # Identify source
+            chat_id = event.chat_id
+            # Handle discrepancies in ID formats (sometimes brings -100 prefix, sometimes not)
+            # We trust self.source_map keys match what Telethon sees or we normalize.
+            # Telethon events usually return the packed ID. 
+            # Let's try to lookup directly.
+            priority = self.source_map.get(chat_id)
+            if priority is None: 
+                # Try finding by name or other means? Or just ignore unknown (shouldn't happen with filter)
+                logger.warning(f"Message from unknown source ID {chat_id}. Defaulting to lowest priority (99).")
+                priority = 99
+                
+            await self.process_message(event.message, priority)
 
-        logger.info("Replicator is running. Waiting for new messages...")
+        logger.info("Antigraviti Multi-Source Replicator Running...")
         await self.client.run_until_disconnected()
 
-    def translate_text(self, text: str):
-        """Translates text to Spanish while protecting specific trading terms."""
-        try:
-            if not text or not self.enable_translation:
-                return text
-            
-            # Terms that should NOT be translated
-            protected_terms = [
-                r'\bBUY\b', r'\bSELL\b', r'\bTP\b', r'\bSL\b', 
-                r'\bSTOPLOSS\b', r'\bSTOP LOSS\b', r'\bENTRY\b', 
-                r'\bLIMIT\b', r'\bORDER\b', r'\bHIT\b'
-            ]
-            
-            # Dictionary to store placeholders and their original values
-            placeholders = {}
-            protected_text = text
-
-            # 1. Identify and replace terms with placeholders (Case-insensitive match, but preserve original)
-            for i, term_pattern in enumerate(protected_terms):
-                # We use a lambda to handle case-insensitive replacements while maintaining a map
-                def replace_func(match):
-                    placeholder = f"__PROTECTED_{i}_{len(placeholders)}__"
-                    placeholders[placeholder] = match.group(0)
-                    return placeholder
-                
-                protected_text = re.sub(term_pattern, replace_func, protected_text, flags=re.IGNORECASE)
-
-            # 2. Translate the text with placeholders
-            logger.info("Translating message to Spanish (with term protection)...")
-            translated_text = self.translator.translate(protected_text)
-
-            # 3. Restore original terms from placeholders
-            for placeholder, original_value in placeholders.items():
-                translated_text = translated_text.replace(placeholder, original_value)
-                # Also handle cases where Google adds spaces around placeholders
-                translated_text = translated_text.replace(f" {placeholder} ", f" {original_value} ")
-
-            return translated_text
-        except Exception as e:
-            logger.error(f"Translation error: {e}")
-            return text
-
-    def clean_message_text(self, text: str):
-        """
-        Applies filtering rules:
-        1. Keyword filter (mandatory)
-        2. Emoji cleaning
-        """
-        if not text:
-            return None
-
-        # --- Rule 0: Global Block Filter ---
+    # --- STAGE: HARD FILTERS ---
+    def run_hard_filters(self, text):
+        if not text: return None
         text_upper = text.upper()
-        for block_word in self.block_keywords:
-            if block_word in text_upper:
-                logger.info(f"Message discarded: Found block keyword '{block_word}'")
-                return None
-
-        # --- Rule 1: Keyword Filter (Case-insensitive) ---
-        if not any(keyword in text_upper for keyword in self.keywords):
-            logger.info("Message ignored: No keywords found.")
-            return None
-
-        # --- Rule 2: Emoji Cleaning (DISABLED as per user request) ---
-        # text = emoji.replace_emoji(text, replace='')
-
-        # --- Rule 3: Promotion Filter (Truncate from word down) ---
-        # Split text into lines to find the trigger word
-        lines = text.split('\n')
-        cleaned_lines = []
         
+        # 1.1 Keywords
+        if not any(w in text_upper for w in ["BUY", "SELL", "TP", "SL"]):
+            return None
+            
+        # 1.3 Promo Trimming
+        lines = text.split('\n')
+        clean_lines = []
         for line in lines:
             line_lower = line.lower()
-            # Check if any trigger word is in this line
-            found_trigger = False
-            for trigger in self.promo_triggers:
-                if trigger in line_lower:
-                    found_trigger = True
-                    break
-            
-            if found_trigger:
-                # Stop processing lines here
-                logger.info(f"Promotion detected and truncated at line: '{line.strip()}'")
-                break
-            else:
-                cleaned_lines.append(line)
-
-        final_text = "\n".join(cleaned_lines).strip()
+            if any(t in line_lower for t in self.promo_triggers):
+                break # Cut everything below
+            clean_lines.append(line)
         
-        # Cleanup: Remove excessive blank lines
-        final_text = re.sub(r'\n\s*\n', '\n', final_text)
+        cleaned_text = "\n".join(clean_lines).strip()
+        cleaned_text_upper = cleaned_text.upper()
+        
+        if not cleaned_text: return None
 
-        return final_text if final_text else None
+        # 1.2 Structure
+        has_direction = "BUY" in cleaned_text_upper or "SELL" in cleaned_text_upper
+        has_sl = "SL" in cleaned_text_upper or "STOP" in cleaned_text_upper
+        # Weak entry check (digit)
+        has_digit = any(c.isdigit() for c in cleaned_text)
 
-    async def process_message(self, message: Message):
-        """
-        Extracts content, applies filters, translates and sends to destination.
-        """
+        if not (has_direction and has_digit and has_sl):
+             return None
+
+        return cleaned_text
+
+    # --- STAGE: LOGICAL FILTERS ---
+    def parse_signal(self, text):
+        text_upper = text.upper()
+        direction = "BUY" if "BUY" in text_upper else "SELL" if "SELL" in text_upper else None
+        
+        # Asset Regex
+        asset = None
+        words = re.findall(r'\b[A-Z0-9]{3,6}\b', text_upper)
+        ignore = ["BUY", "SELL", "SL", "TP", "TP1", "TP2", "ENTRY", "STOP", "LOSS", "ZONE"]
+        for w in words:
+            if w not in ignore:
+                asset = w
+                break
+        return asset, direction
+
+    def is_market_hours(self):
+        now = datetime.now(pytz.UTC)
+        # London (08:00 UTC) to NY Closed (22:00 UTC)? 
+        # Prompt says: "Preferably during London/NY".
+        # Let's say 7 AM UTC to 9 PM UTC covering both.
+        return 6 <= now.hour < 21
+
+    def run_logical_filters(self, text, priority):
+        asset, direction = self.parse_signal(text)
+        
+        if not asset or not direction:
+            # If we can't parse, we can't apply asset logic. 
+            # If structure passed Hard Filter, valid but unparsed. 
+            # Conservative: Allow, but assign 'Unknown' asset? 
+            # Or Block? User said "Si falta... descartar".
+            return True, asset, direction
+
+        # 2.3 Check Duplicates (Exact same signal)
+        if self.state_manager.check_duplicate(asset, direction, None):
+            logger.info(f"Logical: Duplicate signal for {asset}. Ignoring.")
+            return False, asset, direction
+
+        # 2.1 & 2.2 Check Priority / Conflict
+        # We need to know if there's an existing signal for this asset.
+        allowed, action = self.state_manager.check_priority_conflict(asset, priority)
+        
+        if not allowed:
+            logger.info(f"Logical: Priority Block. New Priority {priority} too low or Conflict.")
+            return False, asset, direction
+            
+        if action == 'REPLACE':
+            logger.info(f"Logical: High Priority Signal! Replacing previous state for {asset}.")
+
+        # 2.4 Schedule
+        if not self.is_market_hours():
+            logger.warning("Logical: Outside Market Hours. Conservative mode (Logging only).")
+            # return False, asset, direction # Uncomment to block
+
+        return True, asset, direction
+
+    # --- STAGE: AI FILTER ---
+    async def run_ai_filter(self, text):
+        if not self.ai_api_key: return text
+
+        system_prompt = (
+            "Eres el editor profesional de un club de trading. Tu tarea es validar y normalizar señales.\n"
+            "REGLAS:\n"
+            "1. La señal DEBE tener Activo, Dirección (BUY/SELL), Entrada, SL y TP. Si falta algo vital: REJECT.\n"
+            "2. Estilo profesional, sin emojis, sin promos, sin enlaces.\n"
+            "3. NO inventes datos.\n"
+            "FORMATO DE SALIDA:\n"
+            "Activo: [Activo]\n"
+            "Dirección: BUY / SELL\n"
+            "Entrada: [Precio]\n"
+            "TP1: [Precio]\n"
+            "TP2: [Precio]\n"
+            "SL: [Precio]\n"
+            "Riesgo recomendado: 1–2%\n"
+            "Estado: Activa\n\n"
+            "Si no es válida: REJECT\n"
+            "Mensaje a procesar:"
+        )
+        
+        full_prompt = f"{system_prompt}\n{text}"
+
         try:
-            # Apply text filtering and cleaning
-            original_text = message.text or ""
-            cleaned_text = self.clean_message_text(original_text)
+             async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.ai_api_url,
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.ai_api_key}"},
+                    json={"message": full_prompt, "model": "apifreellm"},
+                    timeout=30.0
+                )
+                if response.status_code == 200:
+                    resp_text = response.json().get('response', '').strip()
+                    if "REJECT" in resp_text.upper() and len(resp_text) < 50:
+                        return None
+                    return resp_text
+        except:
+            return None
+        return None
 
-            # Check if we should ignore based on keywords
-            if not cleaned_text and original_text != "":
-                 return
+    # --- PIPELINE ---
+    async def process_message(self, message: Message, priority: int):
+        original_text = message.text or ""
+        logger.info(f"Pipeline: New msg from Prio {priority}. Len: {len(original_text)}")
+
+        # 1. Hard
+        clean_1 = self.run_hard_filters(original_text)
+        if not clean_1: return
+
+        # 2. Logical
+        passed, asset, direction = self.run_logical_filters(clean_1, priority)
+        if not passed: return
+
+        # 3. AI
+        final_text = await self.run_ai_filter(clean_1)
+        if not final_text: return
+
+        # 4. Publish
+        try:
+            logger.info(f"Pipeline: PUBLISHING for {asset} (Prio {priority})")
+            await self.client.send_message(self.dest_entity, final_text)
             
-            # If no text remains and no media, skip
-            if not cleaned_text and not message.media:
-                return
-
-            # Apply translation if enabled
-            if cleaned_text:
-                cleaned_text = self.translate_text(cleaned_text)
-
-            logger.info("Processing valid message...")
-
-            # Handle Media
-            if message.media:
-                logger.info("Message contains media. Downloading...")
-                file_path = await message.download_media()
-                
-                if file_path:
-                    logger.info(f"Media downloaded to {file_path}. Uploading to destination...")
-                    await self.client.send_file(
-                        self.dest_entity,
-                        file_path,
-                        caption=cleaned_text or "",
-                        force_document=False
-                    )
-                    # Clean up
-                    try:
-                        os.remove(file_path)
-                    except OSError:
-                        pass
-                else:
-                    if cleaned_text:
-                        await self.client.send_message(self.dest_entity, cleaned_text)
-            
-            else:
-                # Just Text
-                if cleaned_text:
-                    logger.info("Sending replicated message...")
-                    await self.client.send_message(self.dest_entity, cleaned_text)
-            
-            logger.info("Message replicated successfully.")
-
+            # 5. Update State
+            if asset and direction:
+                self.state_manager.update_signal(asset, direction, priority)
         except Exception as e:
-            logger.error(f"Error replicating message: {e}")
+            logger.error(f"Publish Error: {e}")

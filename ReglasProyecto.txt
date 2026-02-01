@@ -62,3 +62,564 @@ El mensaje publicado en el grupo destino debe aparecer como contenido original.
 Resultado esperado
 
 Un sistema automatizado, estable y escalable que replique señales o mensajes desde un grupo de Telegram a otro en tiempo casi real, sin marcas de reenvío y sin intervención manual.
+
+--------------------------
+1️⃣ Lógica EXACTA del nuevo filtro (simple y efectiva)
+
+El flujo queda así:
+
+Mensaje entra →
+    1. Filtro por palabras clave (BUY, SELL, etc.)
+        ❌ No tiene → IGNORAR
+        ✅ Tiene → seguir
+    2. Limpieza de emojis basura
+    3. Filtro de promoción
+        → si aparece "promoción", "promo", etc.
+        → borrar esa palabra y TODO lo que esté debajo
+    4. Enviar mensaje limpio
+
+
+Nada más. Nada menos.
+
+🧹 Limpieza de emojis basura (qué significa realmente)
+
+El sistema debe eliminar emojis decorativos que no aportan información.
+
+El texto debe quedar limpio y legible.
+
+No debe romper números, símbolos financieros ni letras.
+
+Ejemplo:
+
+❌ Antes
+
+🔥🔥 BUY BTC 🔥🔥
+TP 45000 🚀🚀
+
+
+✅ Después
+
+BUY BTC
+TP 45000
+
+🚫 Filtro de promoción (regla CLAVE)
+
+Si el mensaje contiene palabras como:
+
+promoción
+
+promo
+
+promocion
+
+publicidad
+
+síguenos
+
+canal
+
+link
+
+👉 Desde esa palabra hacia abajo, TODO se elimina
+
+Ejemplo:
+
+❌ Mensaje original
+
+BUY BTC
+TP 45000
+SL 43000
+
+Promoción:
+Únete a nuestro canal premium
+https://t.me/xxxx
+
+
+✅ Mensaje que se envía
+
+BUY BTC
+TP 45000
+SL 43000
+
+2️⃣ 🔹 PROMPT FINAL PARA ANTIGRAVITI (CON TODO LO QUE QUIERES)
+Objetivo del sistema
+
+Diseñar una automatización inteligente que detecte mensajes entrantes en un grupo de Telegram origen y replique únicamente mensajes relevantes, aplicando un filtro por palabras clave, una limpieza de emojis basura y un filtro de contenido promocional antes de su publicación.
+
+Descripción de la automatización
+
+El sistema debe:
+
+Escuchar continuamente los mensajes nuevos que llegan al grupo de Telegram origen utilizando una cuenta real mediante la librería Telethon.
+
+Al detectar un nuevo mensaje, ejecutar las siguientes reglas en orden estricto:
+
+🔹 Regla 1: Filtro por palabras clave (obligatorio)
+
+Analizar el texto del mensaje.
+
+Comparar el contenido con una lista de palabras clave definidas.
+
+El filtro debe ser case-insensitive.
+
+Si el mensaje no contiene ninguna palabra clave, debe ser ignorado completamente.
+
+Si el mensaje contiene al menos una palabra clave, continúa el procesamiento.
+
+Ejemplo de palabras clave:
+
+BUY
+SELL
+TP
+SL
+ENTRY
+
+🔹 Regla 2: Limpieza de emojis basura
+
+El sistema debe eliminar emojis decorativos o repetitivos que no aporten información.
+
+El contenido textual, números y estructura del mensaje deben mantenerse intactos.
+
+El resultado debe ser un mensaje limpio y legible.
+
+🔹 Regla 3: Filtro de promoción y contenido no deseado
+
+El sistema debe detectar palabras asociadas a promoción o publicidad, como:
+
+promoción
+promo
+promocion
+publicidad
+síguenos
+canal
+link
+
+
+Si alguna de estas palabras aparece en el mensaje:
+
+Se debe eliminar esa palabra y todo el contenido que se encuentre debajo de ella.
+
+Solo debe mantenerse la parte informativa superior del mensaje.
+
+Publicación del mensaje
+
+Solo los mensajes que superen todas las reglas anteriores deben ser publicados.
+
+El mensaje debe replicarse en el grupo de Telegram destino como contenido original, sin utilizar la función de reenvío.
+
+No se deben agregar marcas, textos adicionales ni modificaciones extra.
+
+Tecnologías
+
+Lenguaje: Python
+
+Librería Telegram: Telethon
+
+Orquestación: Antigraviti
+
+Ejecución: Servidor persistente (VPS Linux)
+
+Resultado esperado
+
+Un sistema automatizado que replique únicamente mensajes relevantes, libres de emojis basura y contenido promocional, garantizando señales limpias, profesionales y listas para consumo en tiempo casi real.
+-----------------------------------------
+ESTE ES LAS  INSTRUCCIONES PARA LA IA  DE COMO USARLA COMO  Filtro
+
+🧠 LO QUE QUIERES (resumido en una frase)
+
+👉 La IA NO decide el contenido,
+👉 NO inventa nada,
+👉 NO cambia el significado,
+
+pero sí actúa como un filtro + normalizador, para que:
+
+todos los mensajes:
+
+se vean parecidos
+
+tengan el mismo estilo
+
+parezca que los envía una sola persona
+
+y SOLO se envíen si cumplen todas las reglas que definiste hasta ahora
+
+La IA es un último filtro inteligente, no el dueño del mensaje.
+
+🧩 ARQUITECTURA FINAL (bien hecha)
+
+Así debe funcionar Antigraviti:
+
+Telethon (escucha)
+        ↓
+Filtros duros (código)
+- keywords
+- limpieza emojis
+- cortar promociones
+        ↓
+IA (ApiFreeLLM)
+- valida el mensaje
+- normaliza formato
+- devuelve mensaje limpio
+        ↓
+Publicar en grupo destino
+
+
+⚠️ IMPORTANTE
+Si la IA dice “NO VÁLIDO” → NO se envía nada.
+
+🧠 QUÉ HACE EXACTAMENTE LA IA
+
+La IA debe:
+
+Analizar el mensaje ya filtrado
+
+Verificar que:
+
+es una señal real / mensaje válido
+
+no es charla, spam o promoción encubierta
+
+Reescribir el mensaje SIN cambiar el contenido
+
+Ajustar el formato para que:
+
+todos los mensajes se vean similares
+
+estilo neutro
+
+sin emojis
+
+sin promociones
+
+Responder SOLO con:
+
+el mensaje final listo para enviar
+o
+
+una palabra de rechazo
+
+🚫 COSAS QUE LA IA NO PUEDE HACER
+
+❌ Agregar información nueva
+
+❌ Cambiar precios, números, TP, SL
+
+❌ Agregar opiniones
+
+❌ Cambiar el sentido del mensaje
+
+Esto es CLAVE y debe estar en el prompt.
+
+🔹 PROMPT FINAL PARA ANTIGRAVITI (IA COMO FILTRO ADICIONAL)
+Objetivo del sistema
+
+Integrar una IA como filtro inteligente final dentro de una automatización que replica mensajes de Telegram, asegurando que solo se publiquen mensajes válidos, limpios y con un formato uniforme, sin alterar el contenido original.
+
+Rol de la IA
+
+La IA actúa como un validador y normalizador de mensajes, no como generador de contenido.
+
+Flujo de la automatización
+
+Antigraviti recibe un mensaje ya procesado por filtros previos (palabras clave, limpieza de emojis, eliminación de promociones).
+
+Antes de publicar el mensaje, Antigraviti envía el texto a la IA mediante la API:
+
+POST https://apifreellm.com/api/v1/chat
+
+
+La IA analiza el mensaje y decide si es válido o no.
+
+Si es válido:
+
+Devuelve el mismo contenido, solo ajustando el formato para que sea uniforme.
+
+Si no es válido:
+
+Devuelve una palabra de rechazo.
+
+Reglas estrictas para la IA
+
+La IA debe cumplir obligatoriamente con lo siguiente:
+
+❗ NO cambiar el significado del mensaje.
+
+❗ NO agregar información nueva.
+
+❗ NO eliminar datos importantes (precios, TP, SL, entradas).
+
+❗ NO incluir emojis.
+
+❗ NO incluir contenido promocional.
+
+❗ NO incluir opiniones ni explicaciones.
+
+Formato de salida obligatorio de la IA
+
+La IA debe responder SIEMPRE de una de estas dos formas:
+
+✅ Mensaje válido
+
+Devuelve únicamente el mensaje final limpio y formateado, listo para ser publicado.
+
+Ejemplo:
+
+BUY BTC
+ENTRY: 43800
+TP: 45000
+SL: 43000
+
+❌ Mensaje no válido
+
+Devuelve solo una palabra:
+
+REJECT
+
+Estilo de normalización
+
+Cuando el mensaje es válido, la IA debe:
+
+Usar mayúsculas de forma consistente.
+
+Mantener saltos de línea claros.
+
+Usar siempre el mismo orden lógico de información.
+
+Hacer que todos los mensajes se vean similares entre sí, como si fueran enviados por una sola fuente.
+
+Publicación
+
+Antigraviti solo debe publicar el mensaje si la respuesta de la IA NO es REJECT.
+
+El mensaje se publica como contenido original en el grupo destino.
+
+No se añade ningún texto adicional.
+
+Tecnologías
+
+Lenguaje: Python
+
+IA: ApiFreeLLM
+
+Orquestación: Antigraviti
+
+Librería Telegram: Telethon
+------------------------
+
+Sistema de señales con prioridad por grupos, filtros estrictos e IA como editor final
+🎯 Objetivo del sistema
+
+Diseñar una automatización que procese señales provenientes de múltiples grupos de Telegram, aplicando filtros técnicos, lógicos y editoriales, y resolviendo conflictos mediante un sistema de prioridades, para publicar únicamente señales claras, coherentes y profesionales con una sola voz.
+
+🧩 Grupos de origen y prioridad (orden estricto)
+
+Antigraviti debe asignar prioridad a los grupos de origen de la siguiente forma
+(1 = prioridad más alta):
+
+1️⃣ GTS VIP
+   ID: -1002148227049
+
+2️⃣ 44's Clup
+   ID: -1002310215234
+
+3️⃣ Gold Trader Sunny
+   ID: -1002108856565
+
+4️⃣ FXKINGS SIGNALS
+   ID: -1003020297428
+
+🧠 Regla fundamental de prioridad
+
+👉 Una señal proveniente de un grupo con mayor prioridad SIEMPRE prevalece sobre señales de menor prioridad para el mismo activo.
+
+🧩 Flujo obligatorio de procesamiento
+
+Antigraviti debe ejecutar las siguientes etapas en este orden exacto:
+
+1. Recepción del mensaje
+2. Identificación del grupo de origen y su prioridad
+3. Filtros duros (código)
+4. Filtros lógicos (incluyendo prioridad)
+5. Evaluación y normalización con IA
+6. Publicación (solo si es válida)
+
+
+Si un mensaje falla en cualquier etapa → descartar sin publicar.
+
+1️⃣ Filtros duros (obligatorios, sin IA)
+
+Antigraviti debe ignorar cualquier mensaje que no cumpla TODAS estas condiciones:
+
+🔹 1.1 Palabras clave obligatorias
+
+El mensaje debe contener al menos una de estas palabras (case-insensitive):
+
+BUY
+SELL
+TP
+SL
+
+🔹 1.2 Contenido mínimo estructural
+
+El mensaje debe contener:
+
+Dirección clara (BUY o SELL)
+
+Entrada o rango de entrada
+
+Stop Loss explícito
+
+Si falta alguno → descartar.
+
+🔹 1.3 Corte de contenido promocional
+
+Si el mensaje contiene palabras como:
+
+promo
+promoción
+promocion
+canal
+únete
+link
+
+
+Antigraviti debe:
+
+Eliminar esa palabra
+
+Eliminar todo el contenido que esté debajo
+
+Si el mensaje queda vacío o incompleto → descartar.
+
+2️⃣ Filtros lógicos (criterio del club)
+🔹 2.1 Conflictos por activo y dirección
+
+Antigraviti NO debe permitir publicar señales BUY y SELL simultáneas sobre el mismo activo.
+
+🔹 2.2 Resolución de conflictos por prioridad
+
+Si existe una señal activa o reciente sobre el mismo activo:
+
+Si la nueva señal viene de un grupo con MENOR prioridad, debe ser descartada.
+
+Si la nueva señal viene de un grupo con MAYOR prioridad, puede:
+
+Reemplazar la señal anterior
+
+O invalidarla silenciosamente
+
+Nunca deben publicarse señales contradictorias.
+
+🔹 2.3 Señales duplicadas
+
+Si ya existe una señal publicada con:
+
+Mismo activo
+
+Misma dirección
+
+Entrada similar
+
+La nueva señal debe ser ignorada, independientemente del grupo.
+
+🔹 2.4 Horarios de envío
+
+Las señales deben publicarse preferiblemente durante:
+
+Sesión de Londres
+
+Sesión de Nueva York
+
+Fuera de estos horarios, Antigraviti debe aplicar criterio conservador o descartar.
+
+3️⃣ Evaluación y normalización con IA (editor final)
+
+Solo los mensajes que superen todos los filtros anteriores deben enviarse a la IA.
+
+🧠 Rol de la IA
+
+La IA actúa como editor profesional del club, no como trader.
+
+Debe:
+
+Validar claridad y coherencia
+
+Normalizar formato
+
+Mantener emojis si vienen del mensaje original
+
+Preservar completamente el contenido técnico
+
+❌ Reglas estrictas para la IA
+
+La IA NO PUEDE:
+
+Agregar información nueva
+
+Cambiar precios, TP, SL o dirección
+
+Agregar opiniones
+
+Cambiar el sentido del mensaje
+
+Agregar promoción
+
+🧾 Formato oficial obligatorio (salida de la IA)
+
+Si la señal es válida, la IA debe devolver únicamente este formato:
+
+Activo: [activo]
+
+Dirección: BUY / SELL
+
+Entrada: [precio o rango]
+
+TP1:
+TP2:
+
+SL:
+
+Riesgo recomendado: 1–2%
+
+Estado: Activa
+
+
+Los emojis pueden mantenerse si estaban presentes originalmente.
+
+❌ Señal inválida (salida de la IA)
+
+Si la señal no cumple criterios, la IA debe responder solo con:
+
+REJECT
+
+4️⃣ Publicación
+
+Antigraviti debe:
+
+Publicar el mensaje solo si la respuesta de la IA NO es REJECT
+
+Publicar como contenido original
+
+No agregar texto adicional
+
+Mantener siempre una sola voz del club
+
+✅ Resultado esperado
+
+Un sistema que:
+
+Prioriza fuentes confiables
+
+Evita conflictos entre grupos
+
+Mantiene coherencia y autoridad
+
+Publica señales claras, filtradas y profesionales
+
+🔒 Principios no negociables
+
+Prioridad > cantidad
+
+Claridad > velocidad
+
+Criterio > hype
