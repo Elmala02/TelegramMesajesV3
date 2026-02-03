@@ -1,8 +1,14 @@
 [
     {
+        "asset": "SIGNAL",
+        "direction": "SELL",
+        "priority": 5,
+        "timestamp": "2026-02-03T15:24:01.888265+00:00"
+    },
+    {
         "asset": "GOLD",
-        "direction": "BUY",
-        "entry": "2050",
-        "timestamp": "2026-02-01T03:29:52.157704+00:00"
+        "direction": "SELL",
+        "priority": 5,
+        "timestamp": "2026-02-03T15:52:08.529193+00:00"
     }
 ]

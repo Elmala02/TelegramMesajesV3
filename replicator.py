@@ -102,10 +102,8 @@ class SignalStateManager:
             # New message is LOWER priority. BLOCK.
             return False, 'BLOCK'
         else:
-            # Equal priority. Usually treat as conflict if direction opposes, but 
-            # if we are here, we might have passed duplicates check. 
-            # If direction is different and priority equal -> Conflict -> Block (per Rule 2.1)
-            return False, 'BLOCK'
+            # Equal priority. Allow for now as requested.
+            return True, 'NEW'
 
     def update_signal(self, asset, direction, priority):
         """Adds new signal, removing conflicting ones for the same asset to keep state clean."""
@@ -176,7 +174,7 @@ class TelegramReplicator:
         text_upper = text.upper()
         
         # 1.1 Keywords
-        if not any(w in text_upper for w in ["BUY", "SELL", "TP", "SL"]):
+        if not any(w in text_upper for w in ["BUY", "SELL", "TP", "SL", "HIT", "TARGET", "BE", "BREAK EVEN"]):
             return None
             
         # 1.3 Promo Trimming
@@ -194,12 +192,17 @@ class TelegramReplicator:
         if not cleaned_text: return None
 
         # 1.2 Structure
-        has_direction = "BUY" in cleaned_text_upper or "SELL" in cleaned_text_upper
-        has_sl = "SL" in cleaned_text_upper or "STOP" in cleaned_text_upper
-        # Weak entry check (digit)
+        is_signal = ("BUY" in cleaned_text_upper or "SELL" in cleaned_text_upper) and \
+                    ("SL" in cleaned_text_upper or "STOP" in cleaned_text_upper)
+        is_update = any(w in cleaned_text_upper for w in ["HIT", "TARGET", "TP", "SL", "BE", "BREAK EVEN"])
+
+        # Weak entry check (digit) - Only mandatory for signals, not for quick updates like "TP1 HIT"
         has_digit = any(c.isdigit() for c in cleaned_text)
 
-        if not (has_direction and has_digit and has_sl):
+        if not (is_signal or is_update):
+             return None
+        
+        if is_signal and not has_digit:
              return None
 
         return cleaned_text
@@ -236,10 +239,10 @@ class TelegramReplicator:
             # Or Block? User said "Si falta... descartar".
             return True, asset, direction
 
-        # 2.3 Check Duplicates (Exact same signal)
-        if self.state_manager.check_duplicate(asset, direction, None):
-            logger.info(f"Logical: Duplicate signal for {asset}. Ignoring.")
-            return False, asset, direction
+        # 2.3 Check Duplicates (Exact same signal) - DISABLED BY USER REQUEST
+        # if self.state_manager.check_duplicate(asset, direction, None):
+        #     logger.info(f"Logical: Duplicate signal for {asset}. Ignoring.")
+        #     return False, asset, direction
 
         # 2.1 & 2.2 Check Priority / Conflict
         # We need to know if there's an existing signal for this asset.
@@ -264,21 +267,30 @@ class TelegramReplicator:
         if not self.ai_api_key: return text
 
         system_prompt = (
-            "Eres el editor profesional de un club de trading. Tu tarea es validar y normalizar señales.\n"
-            "REGLAS:\n"
-            "1. La señal DEBE tener Activo, Dirección (BUY/SELL), Entrada, SL y TP. Si falta algo vital: REJECT.\n"
-            "2. Estilo profesional, sin emojis, sin promos, sin enlaces.\n"
-            "3. NO inventes datos.\n"
-            "FORMATO DE SALIDA:\n"
-            "Activo: [Activo]\n"
-            "Dirección: BUY / SELL\n"
-            "Entrada: [Precio]\n"
-            "TP1: [Precio]\n"
-            "TP2: [Precio]\n"
-            "SL: [Precio]\n"
-            "Riesgo recomendado: 1–2%\n"
-            "Estado: Activa\n\n"
-            "Si no es válida: REJECT\n"
+            "Eres un transcriptor experto y editor profesional de un club de trading. "
+            "Tu misión es reescribir el mensaje siguiendo estas REGLAS DE ORO:\n"
+            "1. TRADUCE al español latino neutro si el mensaje está en inglés.\n"
+            "2. REEMPLAZA OBLIGATORIAMENTE cualquier nombre de usuario (ej. @GoldMaster) por: @josejaqueoficial.\n"
+            "3. REEMPLAZA OBLIGATORIAMENTE palabras como 'club', 'hermandad', 'brotherhood', 'familia', 'family' por: Club 10M.\n"
+            "4. TRADUCE 'Managing risk by moving stops/most stops to BE' como: Aseguren ganancias moviendo SL a break even.\n"
+            "5. NORMALIZA el formato según el tipo de mensaje:\n"
+            "   A. Si es una NUEVA SEÑAL (tiene Buy/Sell, SL, TP):\n"
+            "      💎 Activo: [Activo]\n"
+            "      🚀 Dirección: BUY / SELL\n"
+            "      📥 Entrada: [Precio]\n"
+            "      🎯 TP1: [Precio]\n"
+            "      🎯 TP2: [Precio]\n"
+            "      ⛔ SL: [Precio]\n"
+            "      ⚖️ Riesgo recomendado: 1–2%\n"
+            "      ✅ Estado: Activa\n\n"
+            "   B. Si es una ACTUALIZACIÓN (TP HIT, SL HIT, TARGET REACHED):\n"
+            "      💎 Activo: [Activo]\n"
+            "      ✅ Resultado: [Ej: TP1 HIT / SL HIT]\n"
+            "      💰 Ganancia/Pérdida: [Si se menciona, ej: +40 pips]\n"
+            "      📢 Aviso: Club 10M\n\n"
+            "5. Estilo profesional, sin emojis adicionales (mantén los originales si son útiles), sin promos, sin enlaces.\n"
+            "6. NO inventes datos técnicos (precios, TPs, SLs).\n\n"
+            "Si el mensaje es charla irrelevante o falta información vital: responde solo REJECT.\n"
             "Mensaje a procesar:"
         )
         
@@ -297,9 +309,12 @@ class TelegramReplicator:
                     if "REJECT" in resp_text.upper() and len(resp_text) < 50:
                         return None
                     return resp_text
-        except:
+                else:
+                    logger.error(f"AI API Error: {response.status_code} - {response.text}")
+                    return None
+        except Exception as e:
+            logger.error(f"AI Filter Exception: {e}")
             return None
-        return None
 
     # --- PIPELINE ---
     async def process_message(self, message: Message, priority: int):
@@ -315,8 +330,21 @@ class TelegramReplicator:
         if not passed: return
 
         # 3. AI
-        final_text = await self.run_ai_filter(clean_1)
-        if not final_text: return
+        # Bypass AI for very short messages like "TP1 HIT" to avoid AI hallucination/rejection
+        if len(clean_1) < 20:
+            logger.info("Pipeline: Short message detected. Bypassing AI filter.")
+            final_text = clean_1
+        else:
+            final_text = await self.run_ai_filter(clean_1)
+            
+        if not final_text:
+            logger.warning("Pipeline: AI Filter rejected or failed. Message discarded.")
+            return
+
+        # STRIKE RULE: Never publish AI reasoning or "REJECT" explanations
+        if "REJECT" in final_text.upper() or len(final_text) > (len(clean_1) * 3 + 100):
+            logger.warning(f"Pipeline: AI returned a rejection or weird explanation. Discarding to avoid garbage in channel.")
+            return
 
         # 4. Publish
         try:

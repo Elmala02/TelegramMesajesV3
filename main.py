@@ -19,7 +19,8 @@ SOURCE_MAP = {
     -1002148227049: 1,  # GTS VIP
     -1002310215234: 2,  # 44's Clup
     -1002108856565: 3,  # Gold Trader Sunny
-    -1003020297428: 4   # FXKINGS SIGNALS
+    -1003020297428: 4,  # FXKINGS SIGNALS
+    -1003759405936: 5   # Test Channel (New)
 }
 
 def parse_channel_id(val):
