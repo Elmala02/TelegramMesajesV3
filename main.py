@@ -45,8 +45,17 @@ async def main():
     for sid, prio in SOURCE_MAP.items():
         print(f" - Source {sid}: Priority {prio}")
     
-    # Initialize Client
-    client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
+    from telethon.sessions import StringSession
+    
+    # Check for String Session (Vercel/Cloud)
+    SESSION_STRING = os.getenv('SESSION_STRING')
+    
+    if SESSION_STRING:
+        print("Using Session String from Environment...")
+        client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
+    else:
+        print(f"Using File Session '{SESSION_NAME}'...")
+        client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
     
     await client.start()
     

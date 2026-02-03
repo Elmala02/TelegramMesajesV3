@@ -18,10 +18,21 @@ async def main():
     print(f"Initializing Telegram Client '{SESSION_NAME}'...")
     print("If this is your first time, you will be asked to enter your phone number and the code you receive.")
 
-    async with TelegramClient(SESSION_NAME, int(API_ID), API_HASH) as client:
+    from telethon.sessions import StringSession
+
+    # Use StringSession if available, or just create one to export
+    # For auth.py, we want force interactive login to GENERATE the string
+    async with TelegramClient(StringSession(), int(API_ID), API_HASH) as client:
         me = await client.get_me()
         print(f"\nSuccessfully logged in as: {me.first_name} (@{me.username})")
-        print(f"Session file '{SESSION_NAME}.session' has been created/updated.")
+        
+        # EXPORT SESSION STRING
+        session_string = client.session.save()
+        print("Done! Here is your SESSION_STRING for Vercel/Env:")
+        print("-" * 40)
+        print(session_string)
+        print("-" * 40)
+        print("COPY THE STRING ABOVE AND PASTE IT AS 'SESSION_STRING' IN VERCEL ENV VARIABLES.")
 
 if __name__ == '__main__':
     try:
