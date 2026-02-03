@@ -9,7 +9,15 @@ venv/
 *.session
 *.session-journal
 .env
+SESSION_STRING.txt
+session_output.txt
+session_output.log
 
-# Project specific
-replicator_session.session
-replicator_session.session-journal
+# Logs
+*.log
+debug_replicator.log
+
+# Temporary Scripts
+get_session_string.py
+export_session.py
+generate_session.py
