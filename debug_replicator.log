@@ -1,0 +1,32 @@
+2026-02-03 11:07:40,783 - INFO - Pipeline: New msg from Prio 5. Len: 101
+2026-02-03 11:07:40,783 - INFO - Priority Check: Asset=GOLD, NewPrio=5, OldPrio=5
+2026-02-03 11:07:48,581 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-03 11:07:48,582 - INFO - Pipeline: PUBLISHING for GOLD (Prio 5)
+2026-02-03 11:15:51,845 - INFO - Got difference for channel 2657442508 updates
+2026-02-03 11:16:11,678 - INFO - Account is now banned in 3483994525 so we can no longer fetch updates from it
+2026-02-03 11:49:53,264 - INFO - Pipeline: New msg from Prio 4. Len: 293
+2026-02-03 11:49:53,264 - INFO - Priority Check: Asset=GOLD, NewPrio=4, OldPrio=5
+2026-02-03 11:49:53,265 - INFO - Logical: High Priority Signal! Replacing previous state for GOLD.
+2026-02-03 11:50:23,627 - ERROR - AI Filter Exception: 
+2026-02-03 11:50:23,627 - WARNING - Pipeline: AI Filter rejected or failed. Message discarded.
+2026-02-03 11:54:41,954 - INFO - Pipeline: New msg from Prio 2. Len: 542
+2026-02-03 11:56:39,352 - INFO - Pipeline: New msg from Prio 4. Len: 65
+2026-02-03 12:01:18,649 - INFO - Pipeline: New msg from Prio 4. Len: 23
+2026-02-03 13:11:52,890 - INFO - Got difference for channel 1765226347 updates
+2026-02-03 13:24:45,446 - INFO - Got difference for channel 1948580252 updates
+2026-02-03 13:30:20,042 - INFO - Got difference for channel 1948580252 updates
+2026-02-03 13:33:29,911 - INFO - Got difference for account updates
+2026-02-03 13:41:22,517 - INFO - Got difference for channel 1948580252 updates
+2026-02-03 13:42:09,383 - INFO - Got difference for channel 1948580252 updates
+2026-02-03 14:03:30,091 - INFO - Got difference for account updates
+2026-02-03 14:39:47,818 - INFO - Got difference for channel 1948580252 updates
+2026-02-03 14:54:16,403 - INFO - Pipeline: New msg from Prio 4. Len: 136
+2026-02-03 16:05:01,248 - WARNING - Server closed the connection: [WinError 64] El nombre de red especificado ya no está disponible
+2026-02-03 16:05:01,249 - INFO - Connection closed while receiving data: [WinError 64] El nombre de red especificado ya no está disponible
+2026-02-03 16:05:01,249 - INFO - Closing current connection to begin reconnect...
+2026-02-03 16:05:01,250 - INFO - <class 'ConnectionResetError'> during disconnect: [WinError 64] El nombre de red especificado ya no está disponible
+2026-02-03 16:05:01,250 - INFO - Connecting to 149.154.175.52:443/TcpFull...
+2026-02-03 16:05:01,313 - INFO - Connection to 149.154.175.52:443/TcpFull complete!
+2026-02-03 18:18:31,773 - INFO - Got difference for channel 1774783341 updates
+2026-02-03 20:56:06,736 - INFO - Got difference for account updates
+2026-02-03 21:00:41,317 - INFO - Pipeline: New msg from Prio 4. Len: 28
