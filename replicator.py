@@ -173,8 +173,9 @@ class TelegramReplicator:
         if not text: return None
         text_upper = text.upper()
         
-        # 1.1 Keywords
-        if not any(w in text_upper for w in ["BUY", "SELL", "TP", "SL", "HIT", "TARGET", "BE", "BREAK EVEN"]):
+        # 1.1 Keywords (Extended for full words)
+        keywords = ["BUY", "SELL", "TP", "SL", "HIT", "TARGET", "BE", "BREAK EVEN", "ENTRY", "TAKE PROFIT", "STOP LOSS", "SIGNAL"]
+        if not any(w in text_upper for w in keywords):
             return None
             
         # 1.3 Promo Trimming
@@ -273,8 +274,8 @@ class TelegramReplicator:
             "2. REEMPLAZA OBLIGATORIAMENTE cualquier nombre de usuario (ej. @GoldMaster) por: @josejaqueoficial.\n"
             "3. REEMPLAZA OBLIGATORIAMENTE palabras como 'club', 'hermandad', 'brotherhood', 'familia', 'family' por: Club 10M.\n"
             "4. TRADUCE 'Managing risk by moving stops/most stops to BE' como: Aseguren ganancias moviendo SL a break even.\n"
-            "5. NORMALIZA el formato según el tipo de mensaje:\n"
-            "   A. Si es una NUEVA SEÑAL (tiene Buy/Sell, SL, TP):\n"
+            "5. NORMALIZA el formato. Acepta 'Take Profit' como TP, 'Stop Loss' como SL, 'Signal' como Dirección y 'Entry' como Entrada.\n"
+            "   A. Si es una NUEVA SEÑAL (aunque use palabras completas como Take Profit/Stop Loss):\n"
             "      💎 Activo: [Activo]\n"
             "      🚀 Dirección: BUY / SELL\n"
             "      📥 Entrada: [Precio]\n"

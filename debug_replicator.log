@@ -30,3 +30,55 @@
 2026-02-03 18:18:31,773 - INFO - Got difference for channel 1774783341 updates
 2026-02-03 20:56:06,736 - INFO - Got difference for account updates
 2026-02-03 21:00:41,317 - INFO - Pipeline: New msg from Prio 4. Len: 28
+2026-02-03 21:32:29,635 - INFO - Pipeline: New msg from Prio 2. Len: 144
+2026-02-03 21:59:51,604 - INFO - Pipeline: New msg from Prio 4. Len: 43
+2026-02-03 22:30:23,957 - INFO - Pipeline: New msg from Prio 4. Len: 287
+2026-02-03 22:30:30,348 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-03 22:30:30,351 - WARNING - Pipeline: AI Filter rejected or failed. Message discarded.
+2026-02-03 22:33:25,893 - INFO - Pipeline: New msg from Prio 4. Len: 86
+2026-02-03 22:33:56,292 - ERROR - AI Filter Exception: 
+2026-02-03 22:33:56,293 - WARNING - Pipeline: AI Filter rejected or failed. Message discarded.
+2026-02-03 22:56:07,542 - INFO - Got difference for channel 1754381715 updates
+2026-02-03 23:26:07,743 - INFO - Got difference for channel 3508440984 updates
+2026-02-03 23:38:05,079 - INFO - Pipeline: New msg from Prio 5. Len: 96
+2026-02-03 23:38:05,080 - WARNING - Logical: Outside Market Hours. Conservative mode (Logging only).
+2026-02-03 23:38:14,627 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-03 23:38:14,629 - INFO - Pipeline: PUBLISHING for GOLD (Prio 5)
+2026-02-03 23:43:33,868 - INFO - Pipeline: New msg from Prio 4. Len: 0
+2026-02-04 00:03:02,582 - INFO - Pipeline: New msg from Prio 4. Len: 54
+2026-02-04 00:37:47,375 - INFO - Pipeline: New msg from Prio 2. Len: 246
+2026-02-04 00:37:47,375 - WARNING - Logical: Outside Market Hours. Conservative mode (Logging only).
+2026-02-04 00:38:09,250 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-04 00:38:09,252 - WARNING - Pipeline: AI Filter rejected or failed. Message discarded.
+2026-02-04 00:41:08,165 - INFO - Got difference for account updates
+2026-02-04 00:56:08,256 - INFO - Got difference for account updates
+2026-02-04 00:56:08,331 - INFO - Got difference for channel 1754381715 updates
+2026-02-04 01:08:33,122 - INFO - Pipeline: New msg from Prio 2. Len: 12
+2026-02-04 01:08:35,937 - INFO - Pipeline: New msg from Prio 2. Len: 13
+2026-02-04 01:09:23,568 - INFO - Pipeline: New msg from Prio 2. Len: 86
+2026-02-04 01:09:52,051 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-04 01:09:52,053 - WARNING - Pipeline: AI returned a rejection or weird explanation. Discarding to avoid garbage in channel.
+2026-02-04 01:11:24,978 - INFO - Pipeline: New msg from Prio 2. Len: 137
+2026-02-04 01:48:13,195 - INFO - Pipeline: New msg from Prio 2. Len: 0
+2026-02-04 01:49:13,941 - INFO - Pipeline: New msg from Prio 2. Len: 101
+2026-02-04 01:49:42,231 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-04 01:49:42,233 - WARNING - Pipeline: AI returned a rejection or weird explanation. Discarding to avoid garbage in channel.
+2026-02-04 02:07:11,654 - INFO - Got difference for channel 1610937993 updates
+2026-02-04 02:11:12,048 - INFO - Pipeline: New msg from Prio 4. Len: 59
+2026-02-04 02:15:09,823 - INFO - Pipeline: New msg from Prio 2. Len: 13
+2026-02-04 02:15:49,927 - INFO - Pipeline: New msg from Prio 2. Len: 86
+2026-02-04 02:16:16,875 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-04 02:16:16,877 - WARNING - Pipeline: AI returned a rejection or weird explanation. Discarding to avoid garbage in channel.
+2026-02-04 02:17:29,763 - INFO - Pipeline: New msg from Prio 2. Len: 137
+2026-02-04 02:22:00,096 - INFO - Pipeline: New msg from Prio 2. Len: 0
+2026-02-04 02:23:12,123 - INFO - Pipeline: New msg from Prio 2. Len: 148
+2026-02-04 02:23:39,971 - INFO - HTTP Request: POST https://apifreellm.com/api/v1/chat "HTTP/1.1 200 OK"
+2026-02-04 02:23:39,972 - WARNING - Pipeline: AI returned a rejection or weird explanation. Discarding to avoid garbage in channel.
+2026-02-04 02:41:08,990 - INFO - Got difference for channel 2495224665 updates
+2026-02-04 02:41:09,062 - INFO - Got difference for channel 1765226347 updates
+2026-02-04 02:48:16,980 - INFO - Disconnecting from 149.154.175.52:443/TcpFull...
+2026-02-04 02:48:16,981 - INFO - Disconnection from 149.154.175.52:443/TcpFull complete!
+2026-02-04 02:48:23,459 - INFO - Connecting to 149.154.175.52:443/TcpFull...
+2026-02-04 02:48:23,516 - INFO - Connection to 149.154.175.52:443/TcpFull complete!
+2026-02-04 02:48:23,903 - INFO - Listening on sources: [-1002148227049, -1002310215234, -1002108856565, -1003020297428, -1003759405936] -> Destination: -5220562275
+2026-02-04 02:48:23,966 - INFO - Antigraviti Multi-Source Replicator Running...
