@@ -1,7 +1,9 @@
 telethon
 python-dotenv
 cryptg
-emoji
-deep-translator
 httpx
 pytz
+fastapi
+uvicorn
+jinja2
+emoji

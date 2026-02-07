@@ -21,3 +21,7 @@ debug_replicator.log
 get_session_string.py
 export_session.py
 generate_session.py
+
+# Database and State
+*.db
+signal_state.json
