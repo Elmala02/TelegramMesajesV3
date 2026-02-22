@@ -36,10 +36,12 @@ async def main():
         logger.error("Error: Credenciales incompletas (API_ID, API_HASH o SESSION_STRING) en el archivo .env")
         return
 
-    logger.info("--- Iniciando Sistema Multi-Source Antigraviti ---")
+    logger.info("--- Iniciando Sistema Multi-Source CLUB 10M ---")
     logger.info(f"Configuraciones Cargadas: {len(REPLICATION_MAP)}")
-    for sid, cfg in REPLICATION_MAP.items():
-        logger.info(f" - Origen: {cfg['name']} ({sid}) -> Destino: {cfg['dest']} (Topic: {cfg['topic']})")
+    for sid, configs in REPLICATION_MAP.items():
+        if not isinstance(configs, list): configs = [configs]
+        for cfg in configs:
+            logger.info(f" - Origen: {cfg['name']} ({sid}) -> Destino: {cfg['dest']} (Topic: {cfg.get('topic', 'N/A')})")
     
     try:
         logger.info("Conectando con Telegram...")

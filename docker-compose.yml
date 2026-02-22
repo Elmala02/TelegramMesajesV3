@@ -1,0 +1,14 @@
+services:
+  telegram-replicator:
+    build: .
+    container_name: telegram-replicator
+    restart: unless-stopped
+    volumes:
+      - ./.env:/app/.env
+      - ./trading_signals.db:/app/trading_signals.db
+      - ./bot_execution.log:/app/bot_execution.log
+      - ./debug_replicator.log:/app/debug_replicator.log
+      # Si prefieres que el archivo de sesión se guarde fuera del contenedor (si no usas SESSION_STRING en .env)
+      # - ./.session:/app/.session 
+    environment:
+      - PYTHONUNBUFFERED=1

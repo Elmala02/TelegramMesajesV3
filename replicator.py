@@ -7,9 +7,12 @@ from datetime import datetime, timedelta
 import pytz
 import httpx
 import emoji
+from deep_translator import GoogleTranslator
+from langdetect import detect, DetectorFactory
+DetectorFactory.seed = 0
 from telethon import TelegramClient, events
 from telethon.tl.types import Message
-from config import KEYWORDS_OBLIGATORIAS, ANALYSIS_KEYWORDS, PROMO_TRIGGERS
+from config import PROMO_TRIGGERS
 from database import TradingDB
 
 # Configure logging
@@ -35,6 +38,300 @@ class TelegramReplicator:
         self.ai_api_url = os.getenv('AI_API_URL', 'https://apifreellm.com/api/v1/chat')
         self.ai_api_key = os.getenv('AI_API_KEY', '')
 
+        # Diccionario de reemplazos manuales específicos
+        self.manual_replacements = {
+            r"GTS VIP": "👑CLUB 10M",
+            r"GTS FAMILY": "👑CLUB 10M",
+            r"\bGTS\b": "👑CLUB 10M",
+            r"@GoldTraderGTS": "@josejaqueoficial",
+            r"@Therealkim44": "@josejaqueoficial",
+            r"#44fx": "👑CLUB 10M",
+            r"Club 44": "👑CLUB 10M",
+            r"44 club": "👑CLUB 10M",
+            r"\bclub\b(?!\s*10M)": "👑CLUB 10M",
+            r"Sunny": "jose",
+            r"\bkim44\b": "Jose",
+            r"\bkim\b": "Jose",
+            r"\bKim\b": "Jose",
+             r"\bKIM\b": "Jose",
+            r"fly lagi": "vuela de nuevo",
+            r"Jom": "Vamos a",
+            r"jom": "vamos a",
+            r"clear half": "cerrar la mitad",
+            r"Clear half": "Cerrar la mitad",
+            # Términos Malayos adicionales
+            r"Sell junam": "Venta bajista",
+            r"sell junam": "venta bajista",
+            r"junam": "caída/bajista",
+            r"alhamdulillah": "Gracias a Dios",
+            r"Alhamdullilah": "Gracias a Dios",
+            r"iftar": "banquete",
+            r"Kutip": "Recaudar",
+            r"kutip": "recaudar",
+            r"Kita": "Nosotros",
+            r"kita": "nosotros",
+            r"padu": "excelente/fuerte",
+            r"mantap": "genial",
+            r"terbaik": "lo mejor",
+            r"belajar": "aprender",
+            r"cikgu": "profe"
+        }
+
+    def is_in_schedule(self, schedule_config):
+        """Verifica si el momento actual está dentro del horario configurado."""
+        if not schedule_config:
+            return True
+        try:
+            tz = pytz.timezone(schedule_config.get('timezone', 'America/Bogota'))
+            now = datetime.now(tz)
+            
+            from datetime import time
+            current_time = now.time()
+            
+            start_h, start_m = map(int, schedule_config.get('start', '00:00').split(':'))
+            end_h, end_m = map(int, schedule_config.get('end', '23:59').split(':'))
+            
+            start = time(start_h, start_m)
+            end = time(end_h, end_m)
+            
+            if start <= end:
+                return start <= current_time <= end
+            else: # Caso de horario que cruza la medianoche
+                return current_time >= start or current_time <= end
+        except Exception as e:
+            logger.error(f"Error checking schedule: {e}")
+            return True 
+
+    def apply_manual_filters(self, text, source_name=""):
+        """Aplica filtros de reemplazo y descarte (Zoom, reuniones, etc.)"""
+        if not text: return None
+        
+        text_upper = text.upper()
+        
+        # 1. DESCARTE: Zoom (link o palabra)
+        if "ZOOM" in text_upper or "US02WEB.ZOOM.US" in text_upper:
+            logger.info("Filtro: Mensaje descartado por contener ZOOM.")
+            return None
+            
+        # 2. DESCARTE: Reuniones/Clases (FXKINGS o similar) - Inglés y Español
+        reunion_keywords = [
+            "CLASE", "PRINCIPIANTES", "NOS VEMOS EN", "INICIAMOS EN", 
+            "MINUTES TO GO", "MINUTOS PARA EMPEZAR", "CLASS", "BEGINNERS",
+            "SEE YOU IN", "STARTING IN", "JOIN NOW", "ENTRA YA", "WEBINAR",
+            "SESIÓN EN VIVO", "LIVE SESSION"
+        ]
+        if any(kw in text_upper for kw in reunion_keywords):
+            logger.info(f"Filtro: Mensaje de reunión/clase descartado ({source_name}).")
+            return None
+
+        # 3. DESCARTE: VIP (Si el mensaje contiene VIP, no se envía)
+        if "VIP" in text_upper:
+            logger.info(f"Filtro: Mensaje descartado por contener VIP.")
+            return None
+
+        # 4. REEMPLAZOS ESPECÍFICOS
+        final_text = text
+        
+        # Primero aplicamos los reemplazos de marcas específicas
+        for pattern, replacement in self.manual_replacements.items():
+            final_text = re.sub(pattern, replacement, final_text, flags=re.IGNORECASE)
+            
+        # 4. REEMPLAZOS GENERALES (# y @)
+        # - si hay un # se cambia por @josejaqueoficial
+        final_text = re.sub(r'#\S+', '@josejaqueoficial', final_text)
+        
+        # - si hay algún arroba debe ser cambiado por @josejaqueoficial
+        # (Esto captura cualquier mención que no haya sido procesada arriba)
+        final_text = re.sub(r'@\S+', '@josejaqueoficial', final_text)
+
+        return final_text
+
+    def smart_fragment_translation(self, text: str) -> str:
+        """
+        Divide el texto en fragmentos, detecta el idioma y traduce solo lo necesario.
+        Preserva términos técnicos, URLs y emojis.
+        """
+        if not text: return ""
+
+        # 1. Dividir el texto respetando los delimitadores
+        # Usamos regex para dividir por \n, . (seguido de espacio o fin), !, ? manteniendo los delimitadores
+        fragments = re.split(r'(\n|\. |\!|\?)', text)
+        
+        result_fragments = []
+        
+        for fragment in fragments:
+            if not fragment:
+                result_fragments.append("")
+                continue
+                
+            # Si el fragmento es un delimitador, lo dejamos igual
+            if fragment in ['\n', '!', '?', '. ']:
+                result_fragments.append(fragment)
+                continue
+                
+            clean_fragment = fragment.strip()
+            
+            # 2. Validar si el fragmento debe ser traducido
+            is_technical = any(re.search(rf'\b{word}\b', clean_fragment.upper()) for word in ["BUY", "SELL", "TP", "SL", "ENTRY", "XAUUSD", "GOLD"])
+            is_url = re.search(r'http[s]?://\S+|t\.me/\S+', clean_fragment)
+            is_only_numbers = re.match(r'^[\d\.\-\s/]+$', clean_fragment) if clean_fragment else False
+            
+            should_translate = clean_fragment and not is_technical and not is_url and not is_only_numbers
+            
+            if should_translate:
+                try:
+                    # 3. Detectar idioma de forma más flexible
+                    # Si el fragmento contiene palabras clave malayas comúnmente ignoradas por detect()
+                    lang = 'ms' if any(w in clean_fragment.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"]) else detect(clean_fragment)
+                    
+                    if lang != 'es':
+                        # 4. Traducir usando el método existente
+                        translated_fragment = self.translate_manually(fragment)
+                        
+                        # Si después de traducir todavía detectamos fragmentos comunes de malayo,
+                        # aplicamos una traducción forzada palabra por palabra para esos fragmentos.
+                        if any(w in translated_fragment.lower() for w in ["junam", "kutip", "kita", "fly"]):
+                            translated_fragment = self.translate_word_by_word(translated_fragment)
+                            
+                        result_fragments.append(translated_fragment)
+                    else:
+                        result_fragments.append(fragment)
+                except Exception as e:
+                    # Si falla, intentar traducir por si acaso
+                    result_fragments.append(self.translate_manually(fragment))
+            else:
+                result_fragments.append(fragment)
+            
+        return "".join(result_fragments)
+
+    def translate_manually(self, text):
+        """Traduce el texto usando Google Translate preservando términos técnicos."""
+        if not text: return text
+        
+        try:
+            # Lista de términos protegidos que NO queremos traducir
+            protected_terms = {
+                "BUY GOLD": "___BG___",
+                "SELL GOLD": "___SG___",
+                "BUY": "___B___",
+                "SELL": "___S___",
+                "STOP LOSS": "___SL___",
+                "SL": "___SL___",
+                "TP1": "___TP1___",
+                "TP2": "___TP2___",
+                "TP3": "___TP3___",
+                "TP4": "___TP4___",
+                "TP5": "___TP5___",
+                "TP6": "___TP6___",
+                "TAKE PROFIT": "___TP___",
+                "ENTRY": "___E___",
+                "OPEN": "___O___",
+                "BE": "___BE___",
+                "BREAK EVEN": "___BE___",
+                "XAUUSD": "___XAU___",
+                "GOLD": "___G___",
+                "HIT": "___HIT___",
+                "SL": "___SL___",
+                "TP": "___TP___",
+                "ENTRY": "___E___"
+            }
+            
+            # 1. Proteger términos técnicos con placeholders
+            temp_text = text
+            for term, placeholder in protected_terms.items():
+                temp_text = re.sub(rf'\b{term}\b', placeholder, temp_text, flags=re.IGNORECASE)
+            
+            # 2. Traducir el resto con Google Translate (online, sin API key)
+            translator = GoogleTranslator(source='auto', target='es')
+            translated = translator.translate(temp_text)
+            
+            # 3. Restaurar términos técnicos originales
+            # Usamos replace directo porque los placeholders son únicos
+            for term, placeholder in protected_terms.items():
+                translated = translated.replace(placeholder, term)
+                
+            # Asegurar que "HIT" esté en mayúsculas si el usuario lo prefiere así
+            translated = re.sub(rf'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
+
+            # 0. CORRECCIÓN CRÍTICA: "golpe" -> "HIT"
+            # Si el traductor convirtió "Hit" en "golpe" o "Golpe", lo revertimos.
+            translated = re.sub(r'\bgolpe\b', 'HIT', translated, flags=re.IGNORECASE)
+
+            # --- POST-TRADUCCIÓN: FILTROS DE SEGURIDAD PARA MALAYO Y NOMBRES ---
+            # A veces el traductor revive palabras o no traduce ciertas cosas del malayo.
+            # Aquí forzamos una última limpieza.
+            
+            # 1. Reemplazo forzado de nombres que a veces se escapan (Kim, Sunny)
+            translated = re.sub(r'\bkim\b', 'Jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bsunny\b', 'jose', translated, flags=re.IGNORECASE)
+
+            # 2. Reemplazo de palabras malayas residuales comunes (Reforzado)
+            malay_residuals = {
+                r'\blagi\b': 'de nuevo',
+                r'\bjom\b': 'vamos',
+                r'\bfly\b': 'vuela',
+                r'\bnaik\b': 'sube',
+                r'\bturun\b': 'baja',
+                r'\bjunam\b': 'bajar/caer',
+                r'\bkutip\b': 'recaudar',
+                r'\bpadu\b': 'fuerte',
+                r'\bmantap\b': 'excelente'
+            }
+            for pattern, replacement in malay_residuals.items():
+                translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
+                
+            return translated.strip()
+            
+        except Exception as e:
+            logger.error(f"Error en traducción online: {e}")
+            # Si falla la traducción online, usamos un reemplazo básico de palabras clave
+            return self.basic_fallback_translation(text)
+
+    def translate_word_by_word(self, text):
+        """Traduce palabras individuales si la traducción de la frase no fue suficiente."""
+        if not text: return text
+        words = text.split()
+        translated_words = []
+        
+        # Mapeo rápido orientado a trading malayo
+        quick_map = {
+            "junam": "caída",
+            "kutip": "recaudar",
+            "kita": "nosotros",
+            "lagi": "más/de nuevo",
+            "jom": "vamos",
+            "fly": "vuela",
+            "padu": "excelente",
+            "mantap": "genial",
+            "alhamdullilah": "gracias a Dios",
+            "alhamdulillah": "gracias a Dios",
+            "iftar": "cena de ayuno"
+        }
+        
+        for word in words:
+            clean_word = re.sub(r'[^\w]', '', word).lower()
+            if clean_word in quick_map:
+                # Mantener puntuación si existe
+                translated = word.lower().replace(clean_word, quick_map[clean_word])
+                translated_words.append(translated)
+            else:
+                translated_words.append(word)
+        
+        return " ".join(translated_words)
+
+    def basic_fallback_translation(self, text):
+        """Reemplazo simple de palabras clave si falla el traductor online."""
+        translations = {
+            "new signal": "nueva señal",
+            "running": "corriendo",
+            "join our channel": "únete a nuestro canal",
+            "profit": "ganancias"
+        }
+        translated = text.lower()
+        for eng, esp in translations.items():
+            translated = re.sub(rf'\b{eng}\b', esp, translated, flags=re.IGNORECASE)
+        return translated.strip()
+
     async def start(self):
         """Starts listeners for all source channels."""
         source_ids = list(self.replication_map.keys())
@@ -44,122 +341,42 @@ class TelegramReplicator:
         @self.client.on(events.NewMessage(chats=source_ids))
         async def handler(event):
             chat_id = event.chat_id
-            config = self.replication_map.get(chat_id)
+            configs = self.replication_map.get(chat_id)
             
-            if config:
-                priority = config.get('priority', 99)
-                await self.process_message(event.message, priority, config)
-            else:
+            if not configs:
                 logger.warning(f"Message from unknown source ID {chat_id}.")
+                return
 
-        logger.info("Antigraviti Multi-Source Replicator Running...")
+            # Asegurar que configs sea una lista
+            if not isinstance(configs, list):
+                configs = [configs]
+            
+            # Filtrar configs por horario
+            valid_configs = [c for c in configs if self.is_in_schedule(c.get('schedule'))]
+            
+            if valid_configs:
+                priority = valid_configs[0].get('priority', 99)
+                await self.process_message(event.message, priority, valid_configs)
+
+        logger.info("CLUB 10M Multi-Source Replicator Running...")
         await self.client.run_until_disconnected()
 
     # --- STAGE: HARD FILTERS ---
-    def clean_emojis(self, text):
-        """Elimina emojis decorativos manteniendo la legibilidad técnica."""
-        if not text: return ""
-        # Lista de emojis que permitimos (diamante, flechas, checks, etc.)
-        allowed = ["💎", "✅", "🚨", "🎯", "📉", "📈", "💡", "🔑", "📌", "🔥", "🟢", "🔴"]
-        
-        # Descomponer el texto y filtrar emojis no permitidos
-        clean_text = ""
-        for char in text:
-            if char in allowed or not emoji.is_emoji(char):
-                clean_text += char
-        return clean_text.strip()
-
     def run_hard_filters(self, text):
         if not text: return None
         
-        # Limpieza de emojis basura al inicio
-        text = self.clean_emojis(text)
-        if not text: return None
-
-        text_upper = text.upper()
-        
-        # 1.1 Keywords (Extended for full words and BE updates)
-        keywords = KEYWORDS_OBLIGATORIAS
-        
-        # Check if at least one keyword is present
-        if not any(w in text_upper for w in keywords):
-            return None
-            
-        # 1.2 Anti-Analysis Filter: Descartar si el texto es demasiado largo y parece un análisis
-        # Los análisis suelen tener palabras como "Resistance", "Support", "Sentiment", "Drivers"
-        analysis_keywords = ANALYSIS_KEYWORDS
-        analysis_count = sum(1 for w in analysis_keywords if w in text_upper)
-        
-        # Si tiene más de 2 palabras de análisis y es largo, es un reporte, no una señal
-        if analysis_count >= 2 and len(text) > 300:
-            logger.info("Hard Filter: Detected as Market Analysis Report. Discarding.")
-            return None
-
-        # 1.3 Promo Trimming
+        # 1.3 Promo Trimming (SE MANTIENE)
         lines = text.split('\n')
         clean_lines = []
         for line in lines:
             line_lower = line.lower()
             if any(t in line_lower for t in self.promo_triggers):
-                # Si la línea tiene un trigger de promo pero TAMBIÉN tiene TP, SL o Entrada, no la cortamos
-                # Ejemplo: "TP1 5018 (Join our group)" -> no queremos cortar esto si tiene el precio
                 if not any(w in line.upper() for w in ["TP", "SL", "ENTRY", "ENTRADA", "BUY", "SELL", "COMPRA", "VENTA"]):
-                    break 
+                    continue 
             clean_lines.append(line)
         
         cleaned_text = "\n".join(clean_lines).strip()
-        cleaned_text_upper = cleaned_text.upper()
-        
-        if not cleaned_text: return None
-
-        # 1.4 Structure Validation
-        has_entry = "ENTRY" in cleaned_text_upper or "ENTRADA" in cleaned_text_upper or re.search(r'\d{4,}\s*-\s*\d{4,}', cleaned_text_upper)
-        has_sl = "SL" in cleaned_text_upper or "STOP" in cleaned_text_upper
-        has_direction = "BUY" in cleaned_text_upper or "SELL" in cleaned_text_upper or "COMPRA" in cleaned_text_upper or "VENTA" in cleaned_text_upper
-
-        is_signal = has_direction and (has_sl or has_entry)
-        
-        # Valid events that represent updates (TP reached, SL hit, BE)
-        # These are short messages that MUST be allowed
-        update_keywords = [
-            "TP1", "TP 1", "TP2", "TP3", "TP4", 
-            "SL", "STOP LOSS", "STOPLOSS", "🚫SL",
-            "BE", "BREAKEVEN", "BREAK EVEN", "SL TO BE", "MOVE SL", "SL MOVED"
-        ]
-        
-        # Endurecer is_update: Ya no basta con que contenga "BE" o "TP1", 
-        # debe ser un mensaje corto o tener indicadores claros de acción.
-        # El mensaje del usuario contenía "BE" dentro de "successful" (sucessful) y "BEen" (been).
-        # Vamos a usar regex para asegurar que sean palabras completas.
-        
-        has_update_keyword = any(re.search(rf'\b{re.escape(w)}\b', cleaned_text_upper) for w in update_keywords)
-        has_action_keyword = any(re.search(rf'\b{re.escape(w)}\b', cleaned_text_upper) for w in ["HIT", "TARGET", "DONE", "REACHED", "TRIGGERED"])
-        has_moving_stops = "MOVING STOPS" in cleaned_text_upper or "STOPS TO BE" in cleaned_text_upper
-        
-        is_update = has_update_keyword or has_action_keyword or has_moving_stops
-
-        # Si el mensaje es muy largo (> 600 caracteres) y no es una señal clara (is_signal),
-        # probablemente sea charla o comentario, incluso si tiene palabras clave.
-        # Hemos subido el límite de 150 a 600 para permitir señales con mucho texto (como FXKINGS).
-        if len(cleaned_text) > 600 and not is_signal:
-            # Solo permitir si tiene al menos 2 indicadores de actualización muy claros
-            clear_indicators = sum([has_update_keyword, has_action_keyword, has_moving_stops])
-            if clear_indicators < 2:
-                logger.info(f"Hard Filter: Message too long ({len(cleaned_text)}) and lacks clear signal structure. Discarding as chat.")
-                return None
-
-        # Weak entry check (digit) - Mandatory for new signals
-        has_digit = any(c.isdigit() for c in cleaned_text)
-
-        if not (is_signal or is_update):
-             return None
-        
-        # Una señal nueva debe tener números (precios)
-        # Las actualizaciones (is_update) pueden no tener números (ej: "TP1 HIT")
-        if is_signal and not is_update and not has_digit:
-             return None
-
-        return cleaned_text
+        return cleaned_text if cleaned_text else None
 
     # --- STAGE: LOGICAL FILTERS ---
     def parse_signal(self, text):
@@ -319,60 +536,8 @@ class TelegramReplicator:
         # También evitar si el valor es EXACTAMENTE el rango de entrada en el texto
         return True
 
-    def validate_signal_coherence(self, data):
-        """Validates numerical logic (Buy: SL < Entry < TP, Sell: SL > Entry > TP)."""
-        if not data["direction"] or not data["sl"]:
-            return True # Not a full signal or update
-
-        entry = data["entry_min"]
-        sl = data["sl"]
-        tp1 = data["tp1"]
-
-        # Si tp1 es un string (rango o lista), intentamos extraer el primer número
-        if isinstance(tp1, str):
-            match = re.search(r'(\d+(?:\.\d+)?)', tp1)
-            if match:
-                tp1 = float(match.group(1))
-            else:
-                return True # No podemos validar, asumimos coherente
-
-        if not entry or not tp1:
-            return True # Missing fields to validate
-
-        if data["direction"] == "BUY":
-            if not (sl < entry < tp1):
-                logger.warning(f"Coherence Error: BUY signal SL({sl}) must be < Entry({entry}) < TP1({tp1})")
-                return False
-        elif data["direction"] == "SELL":
-            if not (sl > entry > tp1):
-                logger.warning(f"Coherence Error: SELL signal SL({sl}) must be > Entry({entry}) > TP1({tp1})")
-                return False
-        
-        return True
-
-    def is_market_hours(self):
-        now = datetime.now(pytz.UTC)
-        return 6 <= now.hour < 21
-
     def run_logical_filters(self, text, priority):
         data = self.parse_signal(text)
-        asset = data["asset"]
-        direction = data["direction"]
-        
-        if not asset or not direction:
-            return True, data
-
-        # Duplicates check removed by user request
-        
-        # Coherence check
-        if not self.validate_signal_coherence(data):
-            logger.error(f"Logical: Coherence validation failed for {asset} {direction}.")
-            return False, data
-
-        # Schedule
-        if not self.is_market_hours():
-            logger.warning("Logical: Outside Market Hours. Conservative mode (Logging only).")
-
         return True, data
 
     # --- STAGE: AI FILTER ---
@@ -410,18 +575,18 @@ class TelegramReplicator:
             # --- CASO TP ALCANZADO ---
             for i in range(1, 5):
                 if f"TP{i}" in text_upper or f"TP {i}" in text_upper:
-                    return f"✅ TP{i} ALCANZADO"
+                    return f"✅ CLUB 10M: TP{i} ALCANZADO"
             
             # --- CASO STOP LOSS ---
             sl_keywords = ["SL", "STOP LOSS", "STOPLOSS", "🚫SL"]
             if any(w in text_upper for w in sl_keywords) and not any(w in text_upper for w in ["BE", "BREAKEVEN"]):
                 if "HIT" in text_upper or "TRIGGERED" in text_upper or "DONE" in text_upper or len(text_upper) < 20:
-                    return "✅ STOP LOSS ALCANZADO"
+                    return "✅ CLUB 10M: STOP LOSS ALCANZADO"
 
             # --- CASO BREAK EVEN ---
             be_keywords = ["BE", "BREAKEVEN", "BREAK EVEN", "SL TO BE", "MOVE SL", "SL MOVED"]
             if any(w in text_upper for w in be_keywords):
-                return "✅ STOP LOSS MOVIDO A BREAK EVEN"
+                return "✅ CLUB 10M: STOP LOSS MOVIDO A BREAK EVEN"
 
         # 2. Si no es actualización (o si tiene entrada), es una señal nueva
         asset = (data.get("asset") or "GOLD").upper()
@@ -436,9 +601,9 @@ class TelegramReplicator:
         else:
             asset_display = asset
         
-        direction = data.get("direction") or "COMPRA"
-        if direction.upper() == "BUY": direction = "COMPRA"
-        if direction.upper() == "SELL": direction = "VENTA"
+        direction = data.get("direction") or "BUY GOLD"
+        if direction.upper() == "COMPRA": direction = "BUY GOLD"
+        if direction.upper() == "VENTA": direction = "SELL GOLD"
         
         # Determinar Entrada
         entry_min = data.get('entry_min')
@@ -449,10 +614,10 @@ class TelegramReplicator:
             entry_str += f" - {self.clean_num(entry_max)}"
             
         lines = [
-            f"💎 **{asset_display}**",
+            f"💎 **{asset_display}** | CLUB 10M",
             f"Operación: {direction}",
-            f"Stop Loss: {self.clean_num(data.get('sl'))}",
-            f"Entrada: {entry_str}"
+            f"STOP LOSS: {self.clean_num(data.get('sl'))}",
+            f"ENTRY: {entry_str}"
         ]
         
         # TPs (TP1 en adelante)
@@ -461,7 +626,7 @@ class TelegramReplicator:
             if tp_val:
                 # Si es un string con múltiples precios, lo limpiamos un poco
                 if isinstance(tp_val, str):
-                    tp_val = tp_val.replace("OPEN", "Abierto").replace("ABIERTO", "Abierto")
+                    tp_val = tp_val.replace("ABIERTO", "OPEN")
                     # Quitar paréntesis innecesarios si es solo una lista
                     tp_val = tp_val.strip("()")
                 lines.append(f"TP{i}: {self.clean_num(tp_val)}")
@@ -475,151 +640,25 @@ class TelegramReplicator:
         is_gemini_key = self.ai_api_key.startswith("gen-lang-client") or len(self.ai_api_key) > 30
         
         system_prompt = (
-            "Eres un experto en trading. Tu única tarea es traducir y normalizar SEÑALES DE TRADING al ESPAÑOL siguiendo un FORMATO BASE ESTRICTO.\n\n"
+            "TRADUCTOR OBLIGATORIO AL ESPAÑOL - TRADING EXPERT\n\n"
+            "Tu misión es traducir mensajes de trading del INGLÉS al ESPAÑOL de forma obligatoria. No devuelvas el mensaje original en inglés.\n\n"
 
-    "REGLAS DE ORO:\n"
-    "1. USA SIEMPRE EL FORMATO BASE ABAJO. No añadas saludos, ni 'Señal detectada', ni explicaciones.\n"
+            "INSTRUCCIONES DE TRADUCCIÓN:\n"
+            "1. TRADUCE TODO: Cualquier frase, saludo, advertencia o texto descriptivo DEBE ser traducido al español.\n"
+            "   Ejemplo: 'New signal detected' -> 'Nueva señal detectada'\n"
+            "   Ejemplo: 'Hit take profit' -> 'Alcanzó el take profit'\n"
+            "   Ejemplo: 'Join us now' -> 'Únete a nosotros ahora'\n"
+            "2. MANTÉN ESTRUCTURA: Respeta líneas, espacios y emojis originales.\n"
+            "3. MARCA: Reemplaza CUALQUIER link, @mención o nombre de otro grupo por 'CLUB 10M'.\n"
+            "4. TÉRMINOS TÉCNICOS (NO TRADUCIR):\n"
+            "   Mantén estos términos exactamente igual (en inglés):\n"
+            "   - BUY GOLD / SELL GOLD / BUY / SELL\n"
+            "   - STOP LOSS / SL\n"
+            "   - ENTRY / OPEN\n"
+            "   - TP1, TP2, TP3, TP4, TP5, TP6\n"
+            "   - BREAK EVEN / BE\n\n"
 
-    "2. El ORDEN de las líneas es CRÍTICO y OBLIGATORIO:\n"
-    "Activo\n"
-    "Operación\n"
-    "Stop Loss\n"
-    "Entrada\n"
-    "TP1\n"
-    "TP2\n"
-    "TP3\n"
-    "TP4\n\n"
-
-    "3. TRADUCCIONES OBLIGATORIAS:\n"
-    "Buy → COMPRA\n"
-    "Sell → VENTA\n"
-    "Gold → XAUUSD/GOLD\n"
-    "XAUUSD → XAUUSD/GOLD\n"
-    "Entry → Entrada\n"
-    "Take Profit → TP\n"
-    "Stop Loss → Stop Loss\n\n"
-
-    "4. MANTÉN Entrada y TP como campos separados. Nunca los unas.\n"
-
-    "5. ELIMINA links, menciones, publicidad o texto irrelevante.\n"
-
-    "6. 'Take Profit', 'TP' y emojis de TP son equivalentes.\n"
-
-    "7. Si un TP tiene varios precios, inclúyelos en la misma línea separados por coma.\n"
-    "Ejemplo:\n"
-    "TP4: 5050, 5047, 5042, 5036\n\n"
-
-    "8. INTERPRETACIÓN DE EMOJIS:\n"
-    "🥇 = TP1\n"
-    "🥈 = TP2\n"
-    "🥉 = TP3\n"
-    "🎖️ = TP4\n"
-    "🚫SL = Stop Loss\n\n"
-
-    "9. INTERPRETACIÓN DE ENTRADA:\n"
-    "Un número solo → Entrada\n"
-    "Un rango como 5067 - 5059 o 4805-4800 → Entrada\n\n"
-
-    "10. TP OPEN:\n"
-    "Ejemplo:\n"
-    "TP4 Open (5050/5047/5042/5036)\n"
-    "Salida:\n"
-    "TP4: 5050, 5047, 5042, 5036\n\n"
-
-    "11. DETECTAR OPERACIÓN AUTOMÁTICAMENTE SI NO ESTÁ DEFINIDA:\n"
-    "Si los TP están por debajo de la entrada → VENTA\n"
-    "Si los TP están por encima de la entrada → COMPRA\n\n"
-
-    "12. ACTIVO POR DEFECTO:\n"
-    "Si aparece Gold o XAUUSD → usar XAUUSD/GOLD\n"
-    "Si no aparece activo pero los precios son del oro → usar XAUUSD/GOLD\n\n"
-
-    "13. Cuando se envía un TP por separado, es una ACTUALIZACIÓN.\n\n"
-
-    "14. Si el mensaje no contiene una señal válida, NO RESPONDAS.\n\n"
-
-    "--- FORMATO BASE PARA SEÑALES ---\n"
-    "💎 **XAUUSD/GOLD**\n"
-    "Operación: COMPRA o VENTA\n"
-    "Stop Loss: precio\n"
-    "Entrada: precio o rango\n"
-    "TP1: precio\n"
-    "TP2: precio\n"
-    "TP3: precio\n"
-    "TP4: precio\n\n"
-
-    "--- FORMATO PARA ACTUALIZACIONES ---\n"
-    "✅ XAUUSD/GOLD TP ALCANZADO\n\n"
-
-    "Mensaje a procesar:"
-    
-    "15. INTERPRETACIÓN DE MENSAJES SOLO DE TP (ACTUALIZACIONES):\n"
-"Si el mensaje contiene únicamente algo como:\n"
-"TP1\n"
-"TP 1\n"
-"TP1✅\n"
-"✅TP1\n"
-"TP2\n"
-"TP3\n"
-"TP4\n"
-"TP1 HIT\n"
-"TP1 DONE\n"
-"TP1 REACHED\n\n"
-
-"Esto significa que el Take Profit fue ALCANZADO.\n"
-
-"Debes responder usando el FORMATO DE ACTUALIZACIÓN:\n"
-"✅ XAUUSD/GOLD TP1 ALCANZADO\n\n"
-
-"REGLAS IMPORTANTES:\n"
-"- NO incluyas Entrada\n"
-"- NO incluyas Stop Loss\n"
-"- NO incluyas Operación\n"
-"- SOLO envía el formato de actualización\n\n"
-"--- FORMATO PARA ACTUALIZACIONES ---\n"
-"✅ TP1 ALCANZADO\n"
-"✅ TP2 ALCANZADO\n"
-"✅ TP3 ALCANZADO\n"
-"✅ TP4 ALCANZADO\n"
-"✅ STOP LOSS ALCANZADO\n\n"
-
-"16. INTERPRETACIÓN DE ACTUALIZACIONES DE STOP LOSS:\n"
-"Si el mensaje contiene:\n"
-"SL\n"
-"SL HIT\n"
-"SL ✅\n"
-"STOP LOSS\n"
-"STOP LOSS HIT\n"
-"STOP LOSS ✅\n"
-"🚫SL\n"
-"SL TRIGGERED\n\n"
-
-"Significa que el Stop Loss fue alcanzado.\n"
-"Responder usando:\n"
-"✅ XAUUSD/GOLD STOP LOSS ALCANZADO\n\n"
-
-"17. INTERPRETACIÓN DE BREAK EVEN (SL MOVIDO A ENTRADA):\n"
-"Si el mensaje contiene:\n"
-"BE\n"
-"BREAKEVEN\n"
-"SL TO BE\n"
-"SL MOVED TO BE\n"
-"MOVE SL\n"
-"SL MOVED\n\n"
-
-"Significa que el Stop Loss fue movido a Break Even.\n"
-"Responder usando:\n"
-"✅ STOP LOSS MOVIDO A BREAK EVEN\n\n"
-
-"--- FORMATO PARA ACTUALIZACIONES ---\n"
-"✅ TP1 ALCANZADO\n"
-"✅ TP2 ALCANZADO\n"
-"✅ TP3 ALCANZADO\n"
-"✅ TP4 ALCANZADO\n"
-"✅ STOP LOSS ALCANZADO\n"
-"✅ STOP LOSS MOVIDO A BREAK EVEN\n\n"
-
-    
+            "Mensaje a traducir (del inglés al español):"
         )
         
         full_prompt = f"{system_prompt}\n{text}"
@@ -642,14 +681,19 @@ class TelegramReplicator:
 
                     response = await client.post(url, headers=headers, json=payload, timeout=30.0)
                     
+                    logger.info(f"AI: Status {response.status_code} para traducción.")
+                    
                     if response.status_code == 200:
                         if "googleapis.com" in url:
                             resp_text = response.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                         else:
                             resp_text = response.json().get('response', '').strip()
                         
-                        if resp_text and "REJECT" not in resp_text.upper():
+                        if resp_text:
+                            logger.info(f"AI: Traducción exitosa: {resp_text[:50]}...")
                             return resp_text
+                    else:
+                        logger.error(f"AI: Error en API ({response.status_code}): {response.text}")
                     
                     # Si falla con 401 y es clave de Gemini, intentamos endpoint oficial
                     if response.status_code == 401 and is_gemini_key and "googleapis.com" not in url:
@@ -665,82 +709,85 @@ class TelegramReplicator:
             return None
 
     # --- PIPELINE ---
-    async def process_message(self, message: Message, priority: int, config: dict):
+    async def process_message(self, message: Message, priority: int, configs: list):
         source_id = str(message.chat_id)
+        source_name = configs[0].get('name', 'Unknown') if configs else "Unknown"
         msg_id = message.id
         original_text = message.text or ""
         
-        logger.info(f"Pipeline: New msg from Source {source_id} (Prio {priority}). Msg ID: {msg_id}")
-
-        # 1. Hard
-        clean_1 = self.run_hard_filters(original_text)
-        if not clean_1:
-            logger.info(f"Pipeline: Msg {msg_id} discarded by Hard Filters.")
+        # Verificar si al menos un destino permite multimedia si no hay texto
+        any_media_allowed = any(c.get('allow_media') for c in configs)
+        if not original_text and not (message.media and any_media_allowed):
             return
 
-        # 2. Logical
-        passed, parsed_data = self.run_logical_filters(clean_1, priority)
-        if not passed:
-            logger.info(f"Pipeline: Msg {msg_id} discarded by Logical Filters.")
+        # 0. Descartar GIFs completamente (Gif + Texto acompañante)
+        if message.gif:
+            logger.info(f"Pipeline: Mensaje {msg_id} descartado por ser un GIF.")
             return
 
-        asset = parsed_data["asset"]
-        direction = parsed_data["direction"]
+        logger.info(f"Pipeline: Procesando mensaje de {source_name} ({source_id}). Msg ID: {msg_id}")
 
-        # 3. AI
-        final_text = await self.run_ai_filter(clean_1)
-            
-        if not final_text or "REJECT" in final_text.upper() or len(final_text) > (len(clean_1) * 3 + 100):
-            # Check if it's an update (even if direction is missing) or a valid signal
-            is_update = any(w in clean_1.upper() for w in ["TP1", "TP2", "TP3", "TP4", "SL", "BE", "BREAKEVEN"])
-            
-            if (asset and direction) or is_update:
-                logger.info(f"Pipeline: AI failed or rejected msg {msg_id}, but it is a valid signal/update. Using manual formatter.")
-                # Usa el formateador manual para asegurar el formato base si la IA falla
-                final_text = self.format_signal_manually(parsed_data, raw_text=clean_1)
-            else:
-                logger.warning(f"Pipeline: AI Filter rejected msg {msg_id}. Discarded.")
-                return
+        # 1. Aplicar Filtros Manuales (Reemplazos y descartes por Zoom/Clases)
+        text_filtered = self.apply_manual_filters(original_text, source_name)
+        if not text_filtered:
+            logger.info(f"Pipeline: Mensaje {msg_id} descartado por filtros manuales (Zoom/Clase).")
+            return
 
-        # Sanitización Final: Eliminar links y menciones residuales
-        final_text = re.sub(r'http[s]?://\S+', '', final_text)
-        final_text = re.sub(r't\.me/\S+', '', final_text)
-        final_text = re.sub(r'@\S+', '', final_text)
+        # 2. Traducción Inteligente por Fragmentos
+        final_text = self.smart_fragment_translation(text_filtered)
+        
+        logger.info(f"Pipeline: Traducción aplicada.")
+
+        # 3. Sanitización Final (Seguridad extra para links/menciones)
+        # Nota: La marca CLUB 10M se aplica aquí sobre cualquier link/mención residual
+        # que no haya sido capturado por apply_manual_filters
+        final_text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', final_text)
+        final_text = re.sub(r't\.me/\S+', '👑CLUB 10M', final_text)
+        # Las menciones @ ya fueron manejadas en apply_manual_filters, 
+        # pero esto asegura que si aparece algo nuevo sea CLUB 10M
+        
         final_text = final_text.strip()
 
-        # 4. Publish
-        dest_id = config.get('dest')
-        topic_id = config.get('topic')
-        
+        # Publicar en todos los destinos configurados
+        for config in configs:
+            dest_id = config.get('dest')
+            topic_id = config.get('topic')
+            allow_media = config.get('allow_media', False)
+            
+            # Si el destino no permite media y el mensaje es solo media, saltar
+            if not final_text and not (message.media and allow_media):
+                continue
+
+            try:
+                await self.client.send_message(
+                    dest_id, 
+                    final_text, 
+                    reply_to=topic_id,
+                    file=message.media if allow_media else None
+                )
+                logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id}.")
+            except Exception as e:
+                logger.error(f"Pipeline: ERROR enviando Msg {msg_id} a {dest_id}: {e}")
+            
+        # Guardar en DB para registro
         try:
-            logger.info(f"Pipeline: PUBLISHING Msg {msg_id} to Dest {dest_id} (Topic {topic_id})")
-            
-            await self.client.send_message(
-                dest_id, 
-                final_text, 
-                reply_to=topic_id
-            )
-            
-            logger.info(f"Pipeline: SUCCESS - Msg {msg_id} replicated to {dest_id}:{topic_id}")
-            
-            # 5. Save to DB
+            parsed_data = self.parse_signal(original_text)
             signal_entry = {
                 "source_id": source_id,
                 "msg_id": msg_id,
-                "asset": asset,
-                "direction": direction,
-                "entry_min": parsed_data["entry_min"],
-                "entry_max": parsed_data["entry_max"],
-                "tp1": parsed_data["tp1"],
-                "tp2": parsed_data["tp2"],
-                "tp3": parsed_data["tp3"],
-                "tp4": parsed_data["tp4"],
-                "tp5": parsed_data["tp5"],
-                "sl": parsed_data["sl"],
+                "asset": parsed_data.get("asset", "UNKNOWN"),
+                "direction": parsed_data.get("direction", "UNKNOWN"),
+                "entry_min": parsed_data.get("entry_min"),
+                "entry_max": parsed_data.get("entry_max"),
+                "tp1": parsed_data.get("tp1"),
+                "tp2": parsed_data.get("tp2"),
+                "tp3": parsed_data.get("tp3"),
+                "tp4": parsed_data.get("tp4"),
+                "tp5": parsed_data.get("tp5"),
+                "sl": parsed_data.get("sl"),
                 "raw_text": original_text,
                 "formatted_text": final_text
             }
             self.db.save_signal(signal_entry)
-                
         except Exception as e:
-            logger.error(f"Pipeline: ERROR publishing Msg {msg_id}: {e}")
+            logger.error(f"Error guardando señal en DB: {e}")

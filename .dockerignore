@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.git/
+.env
+.session
+*.log
+trading_signals.db
+.ipynb_checkpoints/
+venv/
+env/
