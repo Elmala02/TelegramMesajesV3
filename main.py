@@ -7,6 +7,7 @@ from telethon.sessions import StringSession
 from dotenv import load_dotenv
 from replicator import TelegramReplicator
 from config import REPLICATION_MAP
+import message_cache
 
 # --- CONFIGURACIÓN DE LOGGING ---
 # Forzar encoding UTF-8 para evitar UnicodeEncodeError en Windows
@@ -48,6 +49,11 @@ async def main():
         client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
         await client.start()
         logger.info("Sesión iniciada con éxito.")
+        
+        # Inicializar Cache de Ediciones
+        message_cache.load_cache()
+        asyncio.create_task(message_cache.cache_cleaner_loop())
+        logger.info("Caché de mensajes y loop de limpieza (600s) iniciados.")
         
         replicator = TelegramReplicator(client, REPLICATION_MAP)
         logger.info("Replicador inicializado. Escuchando nuevos mensajes...")

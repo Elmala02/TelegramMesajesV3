@@ -14,6 +14,7 @@ from telethon import TelegramClient, events
 from telethon.tl.types import Message
 from config import PROMO_TRIGGERS
 from database import TradingDB
+import message_cache
 
 # Configure logging
 logging.basicConfig(
@@ -446,6 +447,13 @@ class TelegramReplicator:
                 priority = valid_configs[0].get('priority', 99)
                 await self.process_message(event.message, priority, valid_configs)
 
+
+        # Handler para MENSAJES EDITADOS
+        @self.client.on(events.MessageEdited(chats=source_ids))
+        async def edit_handler(event):
+            # Procesar el mensaje editado a través del sistema de cache
+            await self.handle_message_edit(event.message)
+
         logger.info("CLUB 10M Multi-Source Replicator Running...")
         await self.client.run_until_disconnected()
 
@@ -847,13 +855,16 @@ class TelegramReplicator:
                 continue
 
             try:
-                await self.client.send_message(
+                sent_msg = await self.client.send_message(
                     dest_id, 
                     final_text, 
                     reply_to=topic_id,
                     file=message.media if allow_media else None
                 )
                 logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id}.")
+                
+                # Guardar en cache para soporte de ediciones posteriores
+                message_cache.add_message(msg_id, sent_msg)
             except Exception as e:
                 logger.error(f"Pipeline: ERROR enviando Msg {msg_id} a {dest_id}: {e}")
             
@@ -879,3 +890,45 @@ class TelegramReplicator:
             self.db.save_signal(signal_entry)
         except Exception as e:
             logger.error(f"Error guardando señal en DB: {e}")
+
+    async def handle_message_edit(self, message: Message):
+        """Maneja el evento de edición de un mensaje original usando el cache."""
+        msg_id = message.id
+        mappings = message_cache.get_message(msg_id)
+        
+        if not mappings:
+            # Si no está en cache, lo ignoramos sin romper el bot
+            return
+
+        logger.info(f"Edit: Detectada edición en Msg {msg_id}. Procesando actualización...")
+        
+        original_text = message.text or ""
+        source_id = str(message.chat_id)
+        
+        # Reprocesar el texto a través del pipeline de filtros y traducción
+        text_filtered = self.apply_manual_filters(original_text)
+        if not text_filtered:
+            # Si después de editar ya no cumple los filtros, ignoramos la edición
+            return
+            
+        final_text = self.smart_fragment_translation(text_filtered)
+        
+        # Sanitización extra
+        final_text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', final_text)
+        final_text = re.sub(r't\.me/\S+', '👑CLUB 10M', final_text)
+        final_text = final_text.strip()
+        
+        # Editar todas las réplicas encontradas en el cache
+        for mapping in mappings:
+            try:
+                dest_chat_id = mapping["chat_id"]
+                replicated_msg_id = mapping["replicated_id"]
+                
+                await self.client.edit_message(
+                    dest_chat_id,
+                    replicated_msg_id,
+                    final_text
+                )
+                logger.info(f"Edit: SUCCESS - Msg {msg_id} actualizado en chat {dest_chat_id}.")
+            except Exception as e:
+                logger.error(f"Edit: ERROR al actualizar Msg {msg_id} en {mapping.get('chat_id')}: {e}")
