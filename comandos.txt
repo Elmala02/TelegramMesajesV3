@@ -1,0 +1,32 @@
+# Guía de Comandos - CLUB 10M Replicator
+
+Este archivo contiene los comandos necesarios para gestionar y ejecutar el bot.
+
+## 1. Instalación Inicial (si es necesario)
+Si estás en una carpeta nueva o tras un cambio grande, asegúrate de tener las dependencias:
+```bash
+pip install -r requirements.txt
+```
+
+## 2. Autenticación (Solo la primera vez o si falla la sesión)
+Si necesitas generar una nueva sesión de Telegram:
+```bash
+python auth.py
+```
+
+## 3. Ejecución Principal (El Bot)
+Para iniciar el replicador en tiempo real:
+```bash
+python main.py
+```
+
+## 4. Herramientas Adicionales
+Para enviar los últimos 50 mensajes del historial de los canales configurados (útil para pruebas):
+```bash
+python tools/send_history_filtered.py
+```
+
+Para verificar que el bot tiene acceso a los grupos configurados:
+```bash
+python tools/verify_config.py
+```

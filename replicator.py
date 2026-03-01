@@ -59,23 +59,102 @@ class TelegramReplicator:
             r"jom": "vamos a",
             r"clear half": "cerrar la mitad",
             r"Clear half": "Cerrar la mitad",
-            # Términos Malayos adicionales
-            r"Sell junam": "Venta bajista",
-            r"sell junam": "venta bajista",
-            r"junam": "caída/bajista",
-            r"alhamdulillah": "Gracias a Dios",
-            r"Alhamdullilah": "Gracias a Dios",
-            r"iftar": "banquete",
-            r"Kutip": "Recaudar",
-            r"kutip": "recaudar",
-            r"Kita": "Nosotros",
-            r"kita": "nosotros",
-            r"padu": "excelente/fuerte",
-            r"mantap": "genial",
-            r"terbaik": "lo mejor",
-            r"belajar": "aprender",
-            r"cikgu": "profe"
+            # --- DICCIONARIO MALAYO INTEGRADO ---
+            # Pronombres y Partículas
+            r"\baku\b": "yo", r"\bsaya\b": "yo", r"\bkau\b": "tú", r"\bengkau\b": "tú",
+            r"\bdia\b": "él", r"\bmereka\b": "ellos", r"\bkita\b": "nosotros", r"\bkami\b": "nosotros",
+            r"\bkorang\b": "ustedes", r"\bdiorang\b": "ellos", r"\bnya\b": "su", r"\bpunya\b": "posesión",
+            r"\blah\b": "", r"\bje\b": "solo", r"\bjer\b": "solo", r"\bkah\b": "", 
+            r"\bpun\b": "también", r"\bkan\b": "¿verdad?", r"\bni\b": "este", r"\btu\b": "ese",
+            # Negación y Afirmación
+            r"\btak\b": "no", r"\btk\b": "no", r"\btakde\b": "no hay", r"\bxde\b": "no hay", 
+            r"\btidak\b": "no", r"\bbukan\b": "no es", r"\bbetul\b": "correcto", r"\bya\b": "sí", 
+            r"\bye\b": "sí", r"\byup\b": "sí", r"\bbaik\b": "bien", r"\bboleh\b": "poder", 
+            r"\bblh\b": "poder", r"\bok\b": "bien", r"\bokay\b": "bien",
+            # Tiempo
+            r"\bsekarang\b": "ahora", r"\bskrg\b": "ahora", r"\btadi\b": "hace poco", r"\btd\b": "hace poco",
+            r"\bsemalam\b": "ayer", r"\bmlm\b": "noche", r"\besok\b": "mañana", r"\bnanti\b": "luego",
+            r"\bkejap\b": "un momento", r"\bsat\b": "un momento", r"\blama\b": "mucho tiempo", 
+            r"\bawal\b": "temprano", r"\blambat\b": "tarde", r"\bbaru\b": "recién", 
+            r"\bdulu\b": "antes", r"\bdlu\b": "antes", r"\bselalu\b": "siempre", r"\bkadang\b": "a veces",
+            r"\bjarang\b": "rara vez", r"\bdah\b": "ya", r"\bkawtim\b": "Hecho",
+            # Verbos
+            r"\bmasuk\b": "entrar", r"\bkeluar\b": "salir", r"\bambil\b": "tomar", r"\bbagi\b": "dar",
+            r"\bbuat\b": "hacer", r"\bpergi\b": "ir", r"\bdatang\b": "venir", r"\bnaik\b": "subir", 
+            r"\bturun\b": "bajar", r"\bjatuh\b": "caer", r"\btunggu\b": "esperar", r"\bikut\b": "seguir", 
+            r"\bfaham\b": "entender", r"\bkena\b": "recibir", r"\bjadi\b": "convertirse", r"\bguna\b": "usar", 
+            r"\btengok\b": "ver", r"\blihat\b": "ver", r"\bbuka\b": "abrir", r"\btutup\b": "cerrar", 
+            r"\bcuba\b": "intentar", r"\bharap\b": "esperar", r"\brasa\b": "sentir",
+            # Trading
+            r"\bkuat\b": "fuerte", r"\blemah\b": "débil", r"\bbesar\b": "grande", r"\bkecil\b": "pequeño",
+            r"\bsikit\b": "poco", r"\bbanyak\b": "mucho", r"\bramai\b": "muchos", r"\bcepat\b": "rápido",
+            r"\blaju\b": "veloz", r"\bcantik\b": "limpio", r"\bpadu\b": "sólido", r"\bmantap\b": "excelente",
+            r"\bsteady\b": "estable", r"\bconfirm\b": "confirmado", r"\bheavy\b": "fuerte", r"\bclear\b": "claro",
+            r"\breject\b": "rechazar", r"\bretest\b": "retest", r"\bpecah\b": "romper", r"\btembus\b": "perforar",
+            r"\bpantul\b": "rebotar", r"\breverse\b": "girar", r"\bsapu\b": "barrer", r"lock profit": "asegurar",
+            r"ambil profit": "tomar ganancias", r"add lot": "añadir posición", r"topup": "margen", 
+            r"\bburn\b": "quemar", r"\bhangus\b": "perder todo", r"margin call": "margin call",
+            # Emocionales / Coloquiales
+            r"\bgila\b": "extremadamente", r"\bteruk\b": "grave", r"\bparah\b": "severo", r"\bbest\b": "bueno",
+            r"\bcun\b": "excelente", r"confirm naik": "subida segura", r"confirm drop": "caída segura",
+            r"high chance": "alta probabilidad", r"low risk": "bajo riesgo", r"careful": "cuidado",
+            r"hati hati": "cuidado", r"\bjangan\b": "no", r"\bjgn\b": "no", r"\bpanic\b": "pánico",
+            r"\bgreedy\b": "codicioso", r"\bfomo\b": "fomo", r"\brelax\b": "tranquilo", r"\bchill\b": "tranquilo",
+            r"\bregret\b": "arrepentirse",
+            # Condicionales
+            r"\bkalau\b": "si", r"\bkalu\b": "si", r"\bklau\b": "si", r"\bjika\b": "si", 
+            r"\bif\b": "si", r"\basalkan\b": "siempre que", r"\bselagi\b": "mientras", 
+            r"\bsementara\b": "mientras", r"\bbila\b": "cuando", r"\blepas\b": "después", 
+            r"\bselepas\b": "después", r"\bbefore\b": "antes", r"\bafter\b": "después",
+            # Ubicación / Estructura
+            r"\batas\b": "arriba", r"\bbawah\b": "abajo", r"\bkat\b": "en", r"\bkt\b": "en", 
+            r"\bdekat\b": "cerca", r"\bdkt\b": "cerca", r"\bdlm\b": "dentro", r"\bluar\b": "fuera",
+            r"area ni": "esta zona", r"zone ni": "esta zona", r"level ni": "este nivel",
+            "support ni": "este soporte", "resistance ni": "esta resistencia", 
+            "structure dah break": "estructura rota", "structure fail": "estructura falló",
+            "trend masih": "tendencia todavía", "momentum kuat": "impulso fuerte", "volume sikit": "poco volumen",
+            # Mezclas / Abreviaturas
+            r"kalau tak": "si no", r"kalau tk": "si no", r"tak hold": "no mantiene", r"tak break": "no rompe",
+            r"boleh naik": "puede subir", r"boleh drop": "puede caer", r"boleh fly": "dispararse",
+            r"secure profit": "asegurar", r"close sikit": "cerrar parcial", r"partial dulu": "parcial primero",
+            r"wait dulu": "esperar primero", r"tunggu dulu": "esperar primero", r"burn account sendiri": "quemar cuenta",
+            r"\bmmg\b": "realmente", r"\bmcm\b": "como", r"\bsbb\b": "porque", r"\blg\b": "más",
+            r"\borg\b": "persona", r"\bpd\b": "en", r"\bdr\b": "de",
+            # --- TÉRMINOS RELIGIOSOS Y ESPIRITUALES ---
+            r"\balhamdulillah\b": "Gracias a Dios",
+            r"\balhamdulillahhirabbilalamin\b": "gracias a Dios, Señor del universo",
+            r"\bsyukur\b": "agradecido", r"\bbersyukur\b": "estar agradecido",
+            r"\brezeki\b": "provisión / bendición", r"\bmurahrezeki\b": "abundante provisión",
+            r"\binsyaallah\b": "si Dios quiere", r"\binshaallah\b": "si Dios quiere", r"\binsyallah\b": "si Dios quiere",
+            r"\bamin\b": "amén", r"\baamiin\b": "amén",
+            r"\byaallah\b": "oh Dios", r"\ballah\b": "Dios",
+            r"\bsemoga\b": "ojalá", r"\bmoga\b": "ojalá",
+            r"\bdipermudahkan\b": "que sea facilitado", r"\bpermudahkan\b": "facilitar",
+            r"\bdiizinkan\b": "permitido", r"\bizin\b": "permiso", r"\bizinallah\b": "permiso de Dios",
+            r"\btawakal\b": "confiar en Dios", r"\bikhtiar\b": "esfuerzo", r"\busaha\b": "esfuerzo",
+            r"\bsabar\b": "paciencia", r"\bbersabar\b": "tener paciencia",
+            r"\bredha\b": "aceptar con resignación", r"\breda\b": "aceptar con resignación",
+            r"\btakdir\b": "destino", r"\bqada\b": "decreto divino", r"\bqadar\b": "destino divino",
+            r"\bdugaan\b": "prueba / dificultad", r"\bujian\b": "prueba",
+            r"\bbarakah\b": "bendición", r"\bberkat\b": "bendición", r"\brahmat\b": "misericordia",
+            r"\bdoa\b": "oración", r"\bdoakan\b": "rezar por",
+            r"\bhalal\b": "permitido", r"\bharam\b": "prohibido",
+            r"\bastaghfirullah\b": "pido perdón a Dios", r"\bsubhanallah\b": "gloria a Dios",
+            r"\bmasyaallah\b": "lo que Dios ha querido", r"\bmashaallah\b": "lo que Dios ha querido",
+            r"\bwallahuaklam\b": "Dios sabe mejor", r"\binsaf\b": "arrepentimiento / conciencia",
+            r"\bhijrah\b": "cambio espiritual", r"\bistiqamah\b": "constancia en la fe",
+            r"\bsyafaat\b": "intercesión", r"\bakhirat\b": "vida después de la muerte",
+            r"\bdunia\b": "mundo terrenal", r"\bfakir\b": "pobre",
+            r"\bzakat\b": "caridad obligatoria", r"\bsedekah\b": "caridad", r"\bsedekahsubuh\b": "caridad al amanecer",
+            r"\brezekiallah\b": "provisión de Dios", r"\brezekihariini\b": "bendición de hoy",
+            r"\bbelumrezeki\b": "aún no es provisión", r"\bbukanrezeki\b": "no es provisión",
+            r"\brezekisikit\b": "pequeña bendición", r"\brezekibesar\b": "gran bendición",
+            r"\bdenganizin\b": "con permiso", r"\batasizin\b": "por permiso",
+            r"\bkurnia\b": "regalo / gracia", r"\bnikmat\b": "bendición",
+            r"\bberserah\b": "entregarse", r"\bpasrah\b": "resignarse",
+            r"\bquran\b": "Corán", r"\bsunnah\b": "tradición profética"
         }
+
 
     def is_in_schedule(self, schedule_config):
         """Verifica si el momento actual está dentro del horario configurado."""
@@ -172,17 +251,26 @@ class TelegramReplicator:
             clean_fragment = fragment.strip()
             
             # 2. Validar si el fragmento debe ser traducido
-            is_technical = any(re.search(rf'\b{word}\b', clean_fragment.upper()) for word in ["BUY", "SELL", "TP", "SL", "ENTRY", "XAUUSD", "GOLD"])
+            # Un fragmento se considera técnico SOLO si es MUY corto y contiene palabras clave aisladas
+            # Si el fragmento tiene más de 5 palabras, probablemente es descriptivo y debe traducirse
+            words_in_fragment = [w for w in clean_fragment.split() if len(w) > 1]
+            is_long_description = len(words_in_fragment) > 5
+            
+            is_technical_only = any(re.search(rf'^\b{word}\b$', clean_fragment.upper()) for word in ["BUY", "SELL", "TP", "SL", "ENTRY", "XAUUSD", "GOLD"])
             is_url = re.search(r'http[s]?://\S+|t\.me/\S+', clean_fragment)
             is_only_numbers = re.match(r'^[\d\.\-\s/]+$', clean_fragment) if clean_fragment else False
             
-            should_translate = clean_fragment and not is_technical and not is_url and not is_only_numbers
+            # Si es una descripción larga, forzamos traducción aunque tenga términos técnicos
+            should_translate = clean_fragment and (is_long_description or (not is_technical_only and not is_url and not is_only_numbers))
             
             if should_translate:
                 try:
                     # 3. Detectar idioma de forma más flexible
-                    # Si el fragmento contiene palabras clave malayas comúnmente ignoradas por detect()
-                    lang = 'ms' if any(w in clean_fragment.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"]) else detect(clean_fragment)
+                    # Forzar detección si contiene palabras comunes en inglés
+                    common_english = ["the", "and", "investors", "strength", "driver", "today", "uncertainty"]
+                    is_english_manual = any(re.search(rf'\b{w}\b', clean_fragment.lower()) for w in common_english)
+                    
+                    lang = 'en' if is_english_manual else ('ms' if any(w in clean_fragment.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"]) else detect(clean_fragment))
                     
                     if lang != 'es':
                         # 4. Traducir usando el método existente
@@ -211,6 +299,8 @@ class TelegramReplicator:
         try:
             # Lista de términos protegidos que NO queremos traducir
             protected_terms = {
+                "XAUUSD/GOLD": "___XAUUSD_GOLD___",
+                "XAU/USD": "___XAU_USD___",
                 "BUY GOLD": "___BG___",
                 "SELL GOLD": "___SG___",
                 "BUY": "___B___",
@@ -231,9 +321,7 @@ class TelegramReplicator:
                 "XAUUSD": "___XAU___",
                 "GOLD": "___G___",
                 "HIT": "___HIT___",
-                "SL": "___SL___",
                 "TP": "___TP___",
-                "ENTRY": "___E___"
             }
             
             # 1. Proteger términos técnicos con placeholders
@@ -635,30 +723,20 @@ class TelegramReplicator:
 
     async def run_ai_filter(self, text):
         if not self.ai_api_key: return None
-
         # Si la clave parece de Google Gemini, intentamos usar el endpoint oficial si el proxy falla
         is_gemini_key = self.ai_api_key.startswith("gen-lang-client") or len(self.ai_api_key) > 30
         
         system_prompt = (
-            "TRADUCTOR OBLIGATORIO AL ESPAÑOL - TRADING EXPERT\n\n"
-            "Tu misión es traducir mensajes de trading del INGLÉS al ESPAÑOL de forma obligatoria. No devuelvas el mensaje original en inglés.\n\n"
-
-            "INSTRUCCIONES DE TRADUCCIÓN:\n"
-            "1. TRADUCE TODO: Cualquier frase, saludo, advertencia o texto descriptivo DEBE ser traducido al español.\n"
-            "   Ejemplo: 'New signal detected' -> 'Nueva señal detectada'\n"
-            "   Ejemplo: 'Hit take profit' -> 'Alcanzó el take profit'\n"
-            "   Ejemplo: 'Join us now' -> 'Únete a nosotros ahora'\n"
-            "2. MANTÉN ESTRUCTURA: Respeta líneas, espacios y emojis originales.\n"
-            "3. MARCA: Reemplaza CUALQUIER link, @mención o nombre de otro grupo por 'CLUB 10M'.\n"
-            "4. TÉRMINOS TÉCNICOS (NO TRADUCIR):\n"
-            "   Mantén estos términos exactamente igual (en inglés):\n"
-            "   - BUY GOLD / SELL GOLD / BUY / SELL\n"
-            "   - STOP LOSS / SL\n"
-            "   - ENTRY / OPEN\n"
-            "   - TP1, TP2, TP3, TP4, TP5, TP6\n"
-            "   - BREAK EVEN / BE\n\n"
-
-            "Mensaje a traducir (del inglés al español):"
+            "Actúa como un experto editor financiero y traductor de señales de trading para CLUB 10M.\n\n"
+            "TU OBJETIVO: Traducir íntegramente al ESPAÑOL cualquier análisis de mercado o señal, manteniendo la coherencia técnica y profesional. Translate the entire text to Spanish. Do not leave any English words. Return only Spanish.\n\n"
+            "REGLAS CRÍTICAS:\n"
+            "1. TRADUCCIÓN TOTAL: Si un mensaje contiene párrafos descriptivos en inglés o malayo, TRADÚCELOS COMPLETOS al español con un tono profesional. Ejemplo: 'The tone stays positive' -> 'El tono se mantiene positivo'.\n"
+            "2. PROTECCIÓN TÉCNICA: NO traduzcas ni alteres términos específicos de ejecución: BUY, SELL, ENTRY, SL, TP1-4, GOLD, XAUUSD o los valores numéricos de precio.\n"
+            "3. MEJORA DE ESTILO: Corrige errores gramaticales, elimina slang y asegúrate de que el análisis de mercado suene como un informe de un banco de inversión.\n"
+            "4. BRANDING: Reemplaza cualquier link, usuario (@) o mención de otros canales por 'CLUB 10M'.\n"
+            "5. SIN OMISIONES: No resumas. Traduce cada sección del mensaje original (Impulsores, Resistencia, Apoyo, Sentimiento, etc.).\n"
+            "6. DICCIONARIO MALAYO (Si aplica): Traduce términos como 'junam' (caída), 'lagi' (más), 'jom' (vamos), 'kita' (nosotros) al contexto de trading español.\n\n"
+            "Mensaje a procesar:"
         )
         
         full_prompt = f"{system_prompt}\n{text}"
@@ -733,10 +811,20 @@ class TelegramReplicator:
             logger.info(f"Pipeline: Mensaje {msg_id} descartado por filtros manuales (Zoom/Clase).")
             return
 
-        # 2. Traducción Inteligente por Fragmentos
+        # 2. Normalización y Traducción con IA (DESACTIVADO TEMPORALMENTE)
+        # ai_text = await self.run_ai_filter(text_filtered)
+        # 
+        # if ai_text and ai_text.upper() != "REJECT":
+        #     final_text = ai_text
+        #     logger.info(f"Pipeline: Normalización IA aplicada.")
+        # else:
+        #     # Fallback a traducción manual si la IA falla o no está configurada
+        #     final_text = self.smart_fragment_translation(text_filtered)
+        #     logger.info(f"Pipeline: Fallback a traducción manual aplicada.")
+
+        # USAR SOLO TRADUCCIÓN DEL BOT
         final_text = self.smart_fragment_translation(text_filtered)
-        
-        logger.info(f"Pipeline: Traducción aplicada.")
+        logger.info(f"Pipeline: Traducción interna del bot aplicada (IA desactivada).")
 
         # 3. Sanitización Final (Seguridad extra para links/menciones)
         # Nota: La marca CLUB 10M se aplica aquí sobre cualquier link/mención residual
