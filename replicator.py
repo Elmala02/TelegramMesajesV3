@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import pytz
 import httpx
 import emoji
-from deep_translator import GoogleTranslator
+from deep_translator import GoogleTranslator, MyMemoryTranslator
 from langdetect import detect, DetectorFactory
 DetectorFactory.seed = 0
 from telethon import TelegramClient, events
@@ -21,7 +21,6 @@ logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("debug_replicator.log"),
         logging.StreamHandler()
     ]
 )
@@ -32,7 +31,7 @@ class TelegramReplicator:
         self.client = client
         self.replication_map = replication_map # Dict {source_id: {dest, topic, priority}}
         
-        self.db = TradingDB()
+        # self.db = TradingDB() # Deshabilitado para ahorrar recursos
         
         self.promo_triggers = PROMO_TRIGGERS
         
@@ -60,6 +59,9 @@ class TelegramReplicator:
             r"jom": "vamos a",
             r"clear half": "cerrar la mitad",
             r"Clear half": "Cerrar la mitad",
+            r"44['’]s": "",
+            r"Nak": "",
+            r"Alhamdullilah": "gracias a Dios",
             # --- DICCIONARIO MALAYO INTEGRADO ---
             # Pronombres y Partículas
             r"\baku\b": "yo", r"\bsaya\b": "yo", r"\bkau\b": "tú", r"\bengkau\b": "tú",
@@ -77,8 +79,9 @@ class TelegramReplicator:
             r"\bsemalam\b": "ayer", r"\bmlm\b": "noche", r"\besok\b": "mañana", r"\bnanti\b": "luego",
             r"\bkejap\b": "un momento", r"\bsat\b": "un momento", r"\blama\b": "mucho tiempo", 
             r"\bawal\b": "temprano", r"\blambat\b": "tarde", r"\bbaru\b": "recién", 
-            r"\bdulu\b": "antes", r"\bdlu\b": "antes", r"\bselalu\b": "siempre", r"\bkadang\b": "a veces",
+            r"\bdulu\b": "primero", r"\bdlu\b": "primero", r"\bselalu\b": "siempre", r"\bkadang\b": "a veces",
             r"\bjarang\b": "rara vez", r"\bdah\b": "ya", r"\bkawtim\b": "Hecho",
+            r"\bhold\b": "espera",
             # Verbos
             r"\bmasuk\b": "entrar", r"\bkeluar\b": "salir", r"\bambil\b": "tomar", r"\bbagi\b": "dar",
             r"\bbuat\b": "hacer", r"\bpergi\b": "ir", r"\bdatang\b": "venir", r"\bnaik\b": "subir", 
@@ -188,6 +191,11 @@ class TelegramReplicator:
         
         text_upper = text.upper()
         
+        # 0. DESCARTE: Concurso / Sitio Web / Website
+        if "CONCURSO" in text_upper or "CONTEST" in text_upper or "GIVEAWAY" in text_upper or "RAFFLE" in text_upper or "SWEEPSTAKE" in text_upper or "SWEEPSTAKES" in text_upper or "COMPETITION" in text_upper or "SITIO WEB" in text_upper or "WEBSITE" in text_upper or "WEB SITE" in text_upper or "SITE WEB" in text_upper or "WEB-SITE" in text_upper or "SITE-WEB" in text_upper:
+            logger.info("Filtro: Mensaje descartado por contener CONCURSO o SITIO WEB/WEBSITE.")
+            return None
+
         # 1. DESCARTE: Zoom (link o palabra)
         if "ZOOM" in text_upper or "US02WEB.ZOOM.US" in text_upper:
             logger.info("Filtro: Mensaje descartado por contener ZOOM.")
@@ -211,6 +219,9 @@ class TelegramReplicator:
 
         # 4. REEMPLAZOS ESPECÍFICOS
         final_text = text
+        
+        # Reemplazar 44fx por club 10 m
+        final_text = re.sub(r'44fx\.?', 'club 10 m', final_text, flags=re.IGNORECASE)
         
         # Primero aplicamos los reemplazos de marcas específicas
         for pattern, replacement in self.manual_replacements.items():
@@ -277,6 +288,10 @@ class TelegramReplicator:
                         # 4. Traducir usando el método existente
                         translated_fragment = self.translate_manually(fragment)
                         
+                        if translated_fragment is None:
+                            logger.error(f"Fallo crítico en traducción. Bloqueando el mensaje completo.")
+                            return None
+
                         # Si después de traducir todavía detectamos fragmentos comunes de malayo,
                         # aplicamos una traducción forzada palabra por palabra para esos fragmentos.
                         if any(w in translated_fragment.lower() for w in ["junam", "kutip", "kita", "fly"]):
@@ -286,8 +301,13 @@ class TelegramReplicator:
                     else:
                         result_fragments.append(fragment)
                 except Exception as e:
-                    # Si falla, intentar traducir por si acaso
-                    result_fragments.append(self.translate_manually(fragment))
+                    # Si falla intentamos una vez más y si falla abortamos
+                    logger.warning(f"Error en detección/traducción de fragmento '{clean_fragment}': {e}. Intentando traducción de fallback.")
+                    translated_fragment = self.translate_manually(fragment)
+                    if translated_fragment is None:
+                        logger.error(f"Fallo crítico en traducción de fallback. Bloqueando el mensaje completo.")
+                        return None
+                    result_fragments.append(translated_fragment)
             else:
                 result_fragments.append(fragment)
             
@@ -314,6 +334,10 @@ class TelegramReplicator:
                 "TP4": "___TP4___",
                 "TP5": "___TP5___",
                 "TP6": "___TP6___",
+                "TP7": "___TP7___",
+                "TP8": "___TP8___",
+                "TP9": "___TP9___",
+                "TP10": "___TP10___",
                 "TAKE PROFIT": "___TP___",
                 "ENTRY": "___E___",
                 "OPEN": "___O___",
@@ -331,9 +355,30 @@ class TelegramReplicator:
                 temp_text = re.sub(rf'\b{term}\b', placeholder, temp_text, flags=re.IGNORECASE)
             
             # 2. Traducir el resto con Google Translate (online, sin API key)
-            translator = GoogleTranslator(source='auto', target='es')
-            translated = translator.translate(temp_text)
+            translated = None
+            try:
+                translated = GoogleTranslator(source='auto', target='es').translate(temp_text)
+            except Exception as e_gt:
+                logger.warning(f"GoogleTranslate fallo inicial: {e_gt}. Probando MyMemory.")
             
+            # Validar resultado vacío y probar MyMemory
+            if not translated or not isinstance(translated, str):
+                try:
+                    translated = MyMemoryTranslator(source='auto', target='es').translate(temp_text)
+                except Exception as e_mm:
+                    logger.error(f"MyMemory fallo también: {e_mm}")
+                    translated = None
+            
+            # Validar si Google devolvió un texto de Error 500 en lugar de la traducción
+            if translated and isinstance(translated, str) and "Error 500" in translated and "Server Error" in translated:
+                raise Exception("Google Translate devolvió la página de Error HTTP 500 en lugar de texto traducido.")
+
+            # Si seguimos sin traducción, aplicar fallback básico y devolver algo usable
+            if not translated or not isinstance(translated, str):
+                logger.warning("Fallback: usando traducción básica por ausencia de respuesta de traductores.")
+                basic = self.basic_fallback_translation(text)
+                return self.apply_spanish_terms(basic.strip())
+
             # 3. Restaurar términos técnicos originales
             # Usamos replace directo porque los placeholders son únicos
             for term, placeholder in protected_terms.items():
@@ -344,7 +389,8 @@ class TelegramReplicator:
 
             # 0. CORRECCIÓN CRÍTICA: "golpe" -> "HIT"
             # Si el traductor convirtió "Hit" en "golpe" o "Golpe", lo revertimos.
-            translated = re.sub(r'\bgolpe\b', 'HIT', translated, flags=re.IGNORECASE)
+            # También arregla si tradujo el placeholder ___HIT___ a ___GOLPE___ o _GOLPE_
+            translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
 
             # --- POST-TRADUCCIÓN: FILTROS DE SEGURIDAD PARA MALAYO Y NOMBRES ---
             # A veces el traductor revive palabras o no traduce ciertas cosas del malayo.
@@ -369,12 +415,12 @@ class TelegramReplicator:
             for pattern, replacement in malay_residuals.items():
                 translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
                 
-            return translated.strip()
+            return self.apply_spanish_terms(translated.strip())
             
         except Exception as e:
             logger.error(f"Error en traducción online: {e}")
-            # Si falla la traducción online, usamos un reemplazo básico de palabras clave
-            return self.basic_fallback_translation(text)
+            # Fallback definitivo: al menos normalizar términos a español
+            return self.apply_spanish_terms(text.strip())
 
     def translate_word_by_word(self, text):
         """Traduce palabras individuales si la traducción de la frase no fue suficiente."""
@@ -420,6 +466,27 @@ class TelegramReplicator:
         for eng, esp in translations.items():
             translated = re.sub(rf'\b{eng}\b', esp, translated, flags=re.IGNORECASE)
         return translated.strip()
+
+    def apply_spanish_terms(self, text):
+        if not text: return text
+        try:
+            force = str(os.getenv('FORCE_SPANISH_TERMS', 'true')).lower() in ['true', '1', 'yes', 'on']
+            if not force: return text
+            patterns = [
+                (r'\bBUY GOLD\b', 'Comprar Oro'),
+                (r'\bSELL GOLD\b', 'Vender Oro'),
+                (r'\bBUY\b', 'Comprar'),
+                (r'\bSELL\b', 'Vender'),
+                (r'\bENTRY\b', 'Entrada'),
+                (r'\bOPEN\b', 'Abierto'),
+                (r'\bBREAK\s*EVEN\b', 'BE')
+            ]
+            out = text
+            for p, r in patterns:
+                out = re.sub(p, r, out, flags=re.IGNORECASE)
+            return out
+        except:
+            return text
 
     async def start(self):
         """Starts listeners for all source channels."""
@@ -832,6 +899,10 @@ class TelegramReplicator:
 
         # USAR SOLO TRADUCCIÓN DEL BOT
         final_text = self.smart_fragment_translation(text_filtered)
+        if final_text is None:
+            logger.warning(f"Pipeline: Traducción fallida en Msg {msg_id}. Usando texto original filtrado como fallback.")
+            final_text = text_filtered
+            
         logger.info(f"Pipeline: Traducción interna del bot aplicada (IA desactivada).")
 
         # 3. Sanitización Final (Seguridad extra para links/menciones)
@@ -868,28 +939,28 @@ class TelegramReplicator:
             except Exception as e:
                 logger.error(f"Pipeline: ERROR enviando Msg {msg_id} a {dest_id}: {e}")
             
-        # Guardar en DB para registro
-        try:
-            parsed_data = self.parse_signal(original_text)
-            signal_entry = {
-                "source_id": source_id,
-                "msg_id": msg_id,
-                "asset": parsed_data.get("asset", "UNKNOWN"),
-                "direction": parsed_data.get("direction", "UNKNOWN"),
-                "entry_min": parsed_data.get("entry_min"),
-                "entry_max": parsed_data.get("entry_max"),
-                "tp1": parsed_data.get("tp1"),
-                "tp2": parsed_data.get("tp2"),
-                "tp3": parsed_data.get("tp3"),
-                "tp4": parsed_data.get("tp4"),
-                "tp5": parsed_data.get("tp5"),
-                "sl": parsed_data.get("sl"),
-                "raw_text": original_text,
-                "formatted_text": final_text
-            }
-            self.db.save_signal(signal_entry)
-        except Exception as e:
-            logger.error(f"Error guardando señal en DB: {e}")
+        # Guardar en DB para registro (Deshabilitado para ahorrar CPU y Memoria)
+        # try:
+        #     parsed_data = self.parse_signal(original_text)
+        #     signal_entry = {
+        #         "source_id": source_id,
+        #         "msg_id": msg_id,
+        #         "asset": parsed_data.get("asset", "UNKNOWN"),
+        #         "direction": parsed_data.get("direction", "UNKNOWN"),
+        #         "entry_min": parsed_data.get("entry_min"),
+        #         "entry_max": parsed_data.get("entry_max"),
+        #         "tp1": parsed_data.get("tp1"),
+        #         "tp2": parsed_data.get("tp2"),
+        #         "tp3": parsed_data.get("tp3"),
+        #         "tp4": parsed_data.get("tp4"),
+        #         "tp5": parsed_data.get("tp5"),
+        #         "sl": parsed_data.get("sl"),
+        #         "raw_text": original_text,
+        #         "formatted_text": final_text
+        #     }
+        #     self.db.save_signal(signal_entry)
+        # except Exception as e:
+        #     logger.error(f"Error guardando señal en DB: {e}")
 
     async def handle_message_edit(self, message: Message):
         """Maneja el evento de edición de un mensaje original usando el cache."""
@@ -912,6 +983,8 @@ class TelegramReplicator:
             return
             
         final_text = self.smart_fragment_translation(text_filtered)
+        if final_text is None:
+            final_text = text_filtered
         
         # Sanitización extra
         final_text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', final_text)

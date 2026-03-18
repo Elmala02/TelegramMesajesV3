@@ -8,13 +8,6 @@ REPLICATION_MAP = {
     ],
     -1002310215234: [
         {"dest": -1003797962974, "topic": 3, "name": "44's Clup", "priority": 2, "allow_media": True},
-        # {
-        #     "dest": -1002490959467, 
-        #     "name": "44's Clup (Horario)", 
-        #     "priority": 2, 
-        #     "allow_media": True,
-        #     "schedule": {"start": "05:00", "end": "12:00", "timezone": "America/Bogota"}
-        # },
         {"dest": -1003744952102, "name": "44's Clup (Espejo)", "priority": 2, "allow_media": True}
     ],
     -1002108856565: [
@@ -22,6 +15,9 @@ REPLICATION_MAP = {
     ],
     -1003737486306: [
         {"dest": -1003807690832, "name": "TEST CHANNEL", "priority": 10}
+    ],
+    -1003020297428: [
+        {"dest": -1003827068341, "name": "fXKINGS", "priority": 5, "allow_media": True}
     ]
 }
 

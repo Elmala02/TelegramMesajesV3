@@ -25,3 +25,6 @@ generate_session.py
 # Database and State
 *.db
 signal_state.json
+messages_cache.json
+git_status.txt
+git_remote.txt
