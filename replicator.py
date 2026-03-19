@@ -470,15 +470,9 @@ class TelegramReplicator:
     def apply_spanish_terms(self, text):
         if not text: return text
         try:
-            force = str(os.getenv('FORCE_SPANISH_TERMS', 'true')).lower() in ['true', '1', 'yes', 'on']
+            force = str(os.getenv('FORCE_SPANISH_TERMS', 'false')).lower() in ['true', '1', 'yes', 'on']
             if not force: return text
             patterns = [
-                (r'\bBUY GOLD\b', 'Comprar Oro'),
-                (r'\bSELL GOLD\b', 'Vender Oro'),
-                (r'\bBUY\b', 'Comprar'),
-                (r'\bSELL\b', 'Vender'),
-                (r'\bENTRY\b', 'Entrada'),
-                (r'\bOPEN\b', 'Abierto'),
                 (r'\bBREAK\s*EVEN\b', 'BE')
             ]
             out = text
