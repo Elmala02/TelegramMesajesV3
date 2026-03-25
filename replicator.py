@@ -197,6 +197,11 @@ class TelegramReplicator:
             logger.info("Filtro: Mensaje descartado por contener CONCURSO o SITIO WEB/WEBSITE.")
             return None
 
+        # 0.1 DESCARTE: Links de páginas web (HTTP/HTTPS)
+        if re.search(r'http[s]?://', text, flags=re.IGNORECASE):
+            logger.info("Filtro: Mensaje descartado por contener un link de página web.")
+            return None
+            
         # 1. DESCARTE: Zoom (link o palabra)
         if "ZOOM" in text_upper or "US02WEB.ZOOM.US" in text_upper:
             logger.info("Filtro: Mensaje descartado por contener ZOOM.")
