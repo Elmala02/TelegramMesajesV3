@@ -15,6 +15,7 @@ from telethon.tl.types import Message
 from config import PROMO_TRIGGERS
 from database import TradingDB
 import message_cache
+import qr_detector
 
 # Configure logging
 logging.basicConfig(
@@ -192,7 +193,7 @@ class TelegramReplicator:
         text_upper = text.upper()
         
         # 0. DESCARTE: Concurso / Sitio Web / Website
-        if "CONCURSO" in text_upper or "CONTEST" in text_upper or "GIVEAWAY" in text_upper or "RAFFLE" in text_upper or "SWEEPSTAKE" in text_upper or "SWEEPSTAKES" in text_upper or "COMPETITION" in text_upper or "SITIO WEB" in text_upper or "WEBSITE" in text_upper or "WEB SITE" in text_upper or "SITE WEB" in text_upper or "WEB-SITE" in text_upper or "SITE-WEB" in text_upper:
+        if "CONCURSO" in text_upper or "CONTEST" in text_upper or "GIVEAWAY" in text_upper or "RAFFLE" in text_upper or "SWEEPSTAKE" in text_upper or "SWEEPSTAKES" in text_upper or "COMPETITION" in text_upper or "SITIO WEB" in text_upper or "WEBSITE" in text_upper or "WEB SITE" in text_upper or "WEB-SITE" in text_upper or "SITE-WEB" in text_upper:
             logger.info("Filtro: Mensaje descartado por contener CONCURSO o SITIO WEB/WEBSITE.")
             return None
 
@@ -871,6 +872,23 @@ class TelegramReplicator:
         if message.gif:
             logger.info(f"Pipeline: Mensaje {msg_id} descartado por ser un GIF.")
             return
+
+        # 0.1 CONTROL DE QR CODES
+        if message.photo:
+            temp_path = f"temp_qr_{msg_id}.jpg"
+            try:
+                await message.download_media(file=temp_path)
+                if qr_detector.tiene_qr(temp_path):
+                    logger.warning(f"Pipeline: Mensaje {msg_id} BLOQUEADO - QR detectado en la imagen.")
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    return # 🔥 BLOQUEA EL MENSAJE
+            except Exception as e:
+                logger.error(f"Error procesando QR en Msg {msg_id}: {e}")
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+        
 
         logger.info(f"Pipeline: Procesando mensaje de {source_name} ({source_id}). Msg ID: {msg_id}")
 

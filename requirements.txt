@@ -9,3 +9,4 @@ jinja2
 emoji
 deep_translator
 langdetect
+opencv-python
