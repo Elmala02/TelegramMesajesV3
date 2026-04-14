@@ -169,6 +169,11 @@ class TelegramReplicator:
             tz = pytz.timezone(schedule_config.get('timezone', 'America/Bogota'))
             now = datetime.now(tz)
             
+            # Verificar días de la semana (0 = Lunes, 6 = Domingo)
+            if 'days' in schedule_config:
+                if now.weekday() not in schedule_config['days']:
+                    return False
+            
             from datetime import time
             current_time = now.time()
             
