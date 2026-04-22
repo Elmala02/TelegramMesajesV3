@@ -49,6 +49,8 @@ class TelegramReplicator:
             r"#44fx": "👑CLUB 10M",
             r"Club 44": "👑CLUB 10M",
             r"44 club": "👑CLUB 10M",
+            r"44['’]?s\s*Club": "👑CLUB 10M",
+            r"44['’]?s\s*Clup": "👑CLUB 10M",
             r"\bclub\b(?!\s*10M)": "👑CLUB 10M",
             r"Sunny": "jose",
             r"\bkim44\b": "Jose",
