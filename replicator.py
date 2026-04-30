@@ -230,6 +230,11 @@ class TelegramReplicator:
             logger.info(f"Filtro: Mensaje descartado por contener VIP.")
             return None
 
+        # 3.1 DESCARTE: TikTok (cualquier variación)
+        if "TIKTOK" in text_upper:
+            logger.info(f"Filtro: Mensaje descartado por contener TIKTOK.")
+            return None
+
         # 4. REEMPLAZOS ESPECÍFICOS
         final_text = text
         
