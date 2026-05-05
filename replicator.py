@@ -949,19 +949,23 @@ class TelegramReplicator:
             dest_id = config.get('dest')
             topic_id = config.get('topic')
             allow_media = config.get('allow_media', False)
-            
+            prefix = config.get('prefix', '')
+
+            # Anteponer prefijo al texto si está definido
+            text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
+
             # Si el destino no permite media y el mensaje es solo media, saltar
-            if not final_text and not (message.media and allow_media):
+            if not text_to_send and not (message.media and allow_media):
                 continue
 
             try:
                 sent_msg = await self.client.send_message(
                     dest_id, 
-                    final_text, 
+                    text_to_send, 
                     reply_to=topic_id,
                     file=message.media if allow_media else None
                 )
-                logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id}.")
+                logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id} [prefix='{prefix}'].")
                 
                 # Guardar en cache para soporte de ediciones posteriores
                 message_cache.add_message(msg_id, sent_msg)
@@ -1025,11 +1029,15 @@ class TelegramReplicator:
             try:
                 dest_chat_id = mapping["chat_id"]
                 replicated_msg_id = mapping["replicated_id"]
+
+                # Recuperar prefijo si el mapping lo guardó (compatibilidad hacia atrás)
+                prefix = mapping.get('prefix', '')
+                text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
                 
                 await self.client.edit_message(
                     dest_chat_id,
                     replicated_msg_id,
-                    final_text
+                    text_to_send
                 )
                 logger.info(f"Edit: SUCCESS - Msg {msg_id} actualizado en chat {dest_chat_id}.")
             except Exception as e:
