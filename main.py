@@ -49,11 +49,24 @@ async def main():
         await client.start()
         logger.info("Sesión iniciada con éxito.")
         
-        # Sincronizar entidades: descarga todos los diálogos para que Telethon
-        # reconozca grupos/canales aunque la sesión sea antigua
-        logger.info("Sincronizando entidades de Telegram (get_dialogs)...")
-        await client.get_dialogs()
-        logger.info("Entidades sincronizadas correctamente.")
+        # Resolver explícitamente cada entidad destino del REPLICATION_MAP
+        # Esto garantiza que Telethon las reconozca aunque la sesión sea antigua
+        logger.info("Resolviendo entidades de destino del REPLICATION_MAP...")
+        dest_ids = set()
+        for configs in REPLICATION_MAP.values():
+            cfg_list = configs if isinstance(configs, list) else [configs]
+            for cfg in cfg_list:
+                dest_ids.add(cfg['dest'])
+        
+        for dest_id in dest_ids:
+            try:
+                entity = await client.get_entity(dest_id)
+                title = getattr(entity, 'title', str(dest_id))
+                logger.info(f"  ✓ Entidad resuelta: {dest_id} -> '{title}'")
+            except Exception as e:
+                logger.warning(f"  ✗ No se pudo resolver entidad {dest_id}: {e}")
+        
+        logger.info("Resolución de entidades completada.")
         
         # Inicializar Cache de Ediciones
         message_cache.load_cache()
