@@ -49,6 +49,12 @@ async def main():
         await client.start()
         logger.info("Sesión iniciada con éxito.")
         
+        # Sincronizar entidades: descarga todos los diálogos para que Telethon
+        # reconozca grupos/canales aunque la sesión sea antigua
+        logger.info("Sincronizando entidades de Telegram (get_dialogs)...")
+        await client.get_dialogs()
+        logger.info("Entidades sincronizadas correctamente.")
+        
         # Inicializar Cache de Ediciones
         message_cache.load_cache()
         asyncio.create_task(message_cache.cache_cleaner_loop())
