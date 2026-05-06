@@ -17,7 +17,7 @@ REPLICATION_MAP = {
         {"dest": -1005211269420, "name": "Sr Sniper → Nuevo Grupo", "priority": 3, "prefix": "🎯 Sr Sniper"}
     ],
     -1003737486306: [
-        {"dest": -1003807690832, "name": "TEST CHANNEL", "priority": 10}
+        {"dest": -1005211269420, "name": "PRUEBA", "priority": 10, "allow_media": True, "prefix": "🧪 PRUEBA"}
     ],
     -1003020297428: [
         {"dest": -1003827068341, "name": "fXKINGS", "priority": 5, "allow_media": True}
