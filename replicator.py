@@ -968,7 +968,8 @@ class TelegramReplicator:
                 logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id} [prefix='{prefix}'].")
                 
                 # Guardar en cache para soporte de ediciones posteriores
-                message_cache.add_message(msg_id, sent_msg)
+                # Incluimos el prefijo Y el texto completo enviado para detectar cambios reales
+                message_cache.add_message(msg_id, sent_msg, prefix=prefix, sent_text=text_to_send)
             except Exception as e:
                 logger.error(f"Pipeline: ERROR enviando Msg {msg_id} a {dest_id}: {e}")
             
@@ -1033,6 +1034,14 @@ class TelegramReplicator:
                 # Recuperar prefijo si el mapping lo guardó (compatibilidad hacia atrás)
                 prefix = mapping.get('prefix', '')
                 text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
+
+                # --- PROTECCIÓN ANTI-EDICIÓN FANTASMA ---
+                # Si el texto procesado es IGUAL al que enviamos originalmente,
+                # no tiene sentido editar (evita el bug con MessageEdited por link preview)
+                previously_sent = mapping.get('sent_text', '')
+                if previously_sent and text_to_send.strip() == previously_sent.strip():
+                    logger.info(f"Edit: Msg {msg_id} en {dest_chat_id} - texto sin cambios reales, edición omitida.")
+                    continue
                 
                 await self.client.edit_message(
                     dest_chat_id,

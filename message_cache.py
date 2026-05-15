@@ -39,10 +39,14 @@ def save_cache():
     except Exception as e:
         logger.error(f"❌ Error al guardar cache en JSON: {e}")
 
-def add_message(original_id, replicated_msg_obj):
+def add_message(original_id, replicated_msg_obj, prefix="", sent_text=""):
     """
     Agrega un mapeo de mensaje replicado al cache.
     replicated_msg_obj es el objeto mensaje devuelto por client.send_message.
+    prefix es el texto de cabecera del canal origen (ej: '🏆 77 Club'), que se
+    preserva intacto al editar el mensaje replicado.
+    sent_text es el texto COMPLETO que fue enviado (incluyendo prefijo). Se usa
+    para comparar en ediciones y evitar editar si el texto no cambió realmente.
     """
     orig_id = int(original_id)
     if orig_id not in _cache:
@@ -51,7 +55,9 @@ def add_message(original_id, replicated_msg_obj):
     _cache[orig_id].append({
         "replicated_id": int(replicated_msg_obj.id),
         "chat_id": int(replicated_msg_obj.chat_id),
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "prefix": prefix,       # Guardamos el prefijo para restaurarlo al editar
+        "sent_text": sent_text  # Texto completo enviado, para detectar cambios reales
     })
     # Nota: No guardamos el JSON aquí para mantener eficiencia.
 
