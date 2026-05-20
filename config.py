@@ -4,7 +4,8 @@
 # Mapeo de Replicación (ID Origen -> Lista de {ID Destino, Topic ID, Prioridad, Nombre})
 REPLICATION_MAP = {
     -1002148227049: [
-        {"dest": -1003797962974, "topic": 2, "name": "GTS VIP", "priority": 1}
+        {"dest": -1003797962974, "topic": 2, "name": "GTS VIP", "priority": 1},
+        {"dest": -1003425756296, "name": "SR SNIPER VIP👑", "priority": 1, "prefix": "SR SNIPER VIP👑"}
     ],
     -1002310215234: [
         {"dest": -1003797962974, "topic": 3, "name": "44's Clup", "priority": 2, "allow_media": True},
