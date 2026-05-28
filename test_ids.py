@@ -14,7 +14,10 @@ async def check():
     client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
     await client.start()
     
-    ids_to_check = [-3737486306, -3807690832, -1003737486306, -1003807690832]
+    ids_to_check = [
+        -1003737486306, -1003807690832,
+        -1002193953987, -1002133761864, -1003702802171
+    ]
     
     for tid in ids_to_check:
         try:

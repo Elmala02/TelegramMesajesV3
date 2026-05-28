@@ -22,6 +22,12 @@ REPLICATION_MAP = {
     ],
     -1003020297428: [
         {"dest": -1003827068341, "name": "fXKINGS", "priority": 5, "allow_media": True}
+    ],
+    -1002193953987: [
+        {"dest": -1003702802171, "topic": 3, "name": "MRGOOD VIP", "priority": 1, "allow_media": True}
+    ],
+    -1002133761864: [
+        {"dest": -1003702802171, "topic": 2, "name": "MRGOOD", "priority": 2, "allow_media": True}
     ]
 }
 
