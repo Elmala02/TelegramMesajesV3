@@ -950,6 +950,8 @@ class TelegramReplicator:
             topic_id = config.get('topic')
             allow_media = config.get('allow_media', False)
             prefix = config.get('prefix', '')
+            if prefix and not prefix.startswith("REENVIADO POR "):
+                prefix = f"REENVIADO POR {prefix}"
 
             # Anteponer prefijo al texto si está definido
             text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
@@ -1033,6 +1035,8 @@ class TelegramReplicator:
 
                 # Recuperar prefijo si el mapping lo guardó (compatibilidad hacia atrás)
                 prefix = mapping.get('prefix', '')
+                if prefix and not prefix.startswith("REENVIADO POR "):
+                    prefix = f"REENVIADO POR {prefix}"
                 text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
 
                 # --- PROTECCIÓN ANTI-EDICIÓN FANTASMA ---

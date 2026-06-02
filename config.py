@@ -5,17 +5,19 @@
 REPLICATION_MAP = {
     -1002148227049: [
         {"dest": -1003797962974, "topic": 2, "name": "GTS VIP", "priority": 1},
-        {"dest": -1003425756296, "name": "SR SNIPER VIP👑", "priority": 1, "prefix": "SR SNIPER VIP👑"}
+        {"dest": -1003425756296, "name": "SR SNIPER VIP👑", "priority": 1, "prefix": "SR SNIPER VIP👑"},
+        {"dest": -1002490959467, "name": "SR SNIPER VIP👑 Nuevo (44's Clup Nuevo)", "priority": 1, "allow_media": True, "prefix": "SR SNIPER VIP👑", "schedule": {"days": [1, 3], "start": "05:00", "end": "12:00", "timezone": "America/Bogota"}}
     ],
     -1002310215234: [
         {"dest": -1003797962974, "topic": 3, "name": "44's Clup", "priority": 2, "allow_media": True},
         {"dest": -1003744952102, "name": "44's Clup (Espejo)", "priority": 2, "allow_media": True},
-        {"dest": -1002490959467, "name": "44's Clup Nuevo", "priority": 2, "allow_media": True, "schedule": {"days": [1, 3], "start": "05:00", "end": "12:00", "timezone": "America/Bogota"}},
-        {"dest": -1003425756296, "name": "77 Club → Nuevo Grupo", "priority": 2, "allow_media": True, "prefix": "🏆 77 Club"}
+        {"dest": -1003425756296, "name": "77 Club → Nuevo Grupo", "priority": 2, "allow_media": True, "prefix": "🏆 77 Club"},
+        {"dest": -1002490959467, "name": "77 Club a 44's Clup Nuevo", "priority": 2, "allow_media": True, "prefix": "🏆 77 Club", "schedule": {"days": [1, 3], "start": "05:00", "end": "12:00", "timezone": "America/Bogota"}}
     ],
     -1002108856565: [
         {"dest": -1003797962974, "topic": 4, "name": "Gold Trader Sunny", "priority": 3},
-        {"dest": -1003425756296, "name": "Sr Sniper → Nuevo Grupo", "priority": 3, "prefix": "🎯 Sr Sniper"}
+        {"dest": -1003425756296, "name": "Sr Sniper → Nuevo Grupo", "priority": 3, "prefix": "🎯 Sr Sniper"},
+        {"dest": -1002490959467, "name": "Sr Sniper a 44's Clup Nuevo", "priority": 3, "allow_media": True, "prefix": "🎯 Sr Sniper", "schedule": {"days": [1, 3], "start": "05:00", "end": "12:00", "timezone": "America/Bogota"}}
     ],
     -1003737486306: [
         {"dest": -1003425756296, "name": "PRUEBA", "priority": 10, "allow_media": True, "prefix": "🧪 PRUEBA"}
