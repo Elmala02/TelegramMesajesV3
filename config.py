@@ -29,7 +29,7 @@ REPLICATION_MAP = {
         {"dest": -1003702802171, "topic": 3, "name": "MRGOOD VIP", "priority": 1, "allow_media": True}
     ],
     -1002133761864: [
-        {"dest": -1003702802171, "topic": 2, "name": "MRGOOD", "priority": 2, "allow_media": True}
+        {"dest": -1003702802171, "topic": 2, "name": "MRGOOD", "priority": 2}
     ]
 }
 
