@@ -10,7 +10,7 @@ REPLICATION_MAP = {
     ],
     -1002310215234: [
         {"dest": -1003797962974, "topic": 3, "name": "44's Clup", "priority": 2, "allow_media": True},
-        {"dest": -1003744952102, "name": "44's Clup (Espejo)", "priority": 2, "allow_media": True},
+        # {"dest": -1003744952102, "name": "44's Clup (Espejo)", "priority": 2, "allow_media": True}, # Pausado temporalmente
         {"dest": -1003425756296, "name": "77 Club → Nuevo Grupo", "priority": 2, "allow_media": True, "prefix": "🏆 77 Club"},
         {"dest": -1002490959467, "name": "77 Club a 44's Clup Nuevo", "priority": 2, "allow_media": True, "prefix": "🏆 77 Club", "schedule": {"days": [1, 3], "start": "05:00", "end": "12:00", "timezone": "America/Bogota"}}
     ],
@@ -26,10 +26,10 @@ REPLICATION_MAP = {
         {"dest": -1003827068341, "name": "fXKINGS", "priority": 5, "allow_media": True}
     ],
     -1002193953987: [
-        {"dest": -1003702802171, "topic": 3, "name": "MRGOOD VIP", "priority": 1, "allow_media": True}
+        # {"dest": -1003702802171, "topic": 3, "name": "MRGOOD VIP", "priority": 1, "allow_media": True} # Pausado temporalmente
     ],
     -1002133761864: [
-        {"dest": -1003702802171, "topic": 2, "name": "MRGOOD", "priority": 2}
+        # {"dest": -1003702802171, "topic": 2, "name": "MRGOOD", "priority": 2} # Pausado temporalmente
     ]
 }
 
