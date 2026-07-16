@@ -32,7 +32,7 @@ REPLICATION_MAP = {
         # {"dest": -1003702802171, "topic": 2, "name": "MRGOOD", "priority": 2} # Pausado temporalmente
     ],
     -1002455597797: [
-        {"dest": -5366346829, "name": "Nuevo Destino", "priority": 1, "allow_media": True}
+        {"dest": -1004438757585, "name": "Nuevo Destino", "priority": 1, "allow_media": True}
     ]
 }
 
