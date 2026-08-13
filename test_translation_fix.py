@@ -28,10 +28,14 @@ The tone stays positive for gold into the European and US sessions. Las ofertas 
 
     print("--- TEXTO ORIGINAL ---")
     print(test_message)
-    print("\n--- TRADUCCIÓN (FALLBACK MANUAL) ---")
+    print("\n--- TRADUCCIÓN (FALLBACK MANUAL SÍNCRONO) ---")
     # Test manual fallback first
     fallback_result = replicator.smart_fragment_translation(test_message)
     print(fallback_result)
+
+    print("\n--- TRADUCCIÓN (FALLBACK MANUAL ASÍNCRONO) ---")
+    fallback_result_async = await replicator.smart_fragment_translation_async(test_message)
+    print(fallback_result_async)
     
     print("\n--- TRADUCCIÓN (IA) ---")
     # Test AI (if key is available)
