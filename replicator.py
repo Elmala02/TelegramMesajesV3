@@ -1082,19 +1082,8 @@ class TelegramReplicator:
         #     final_text = self.smart_fragment_translation(text_filtered)
         #     logger.info(f"Pipeline: Fallback a traducción manual aplicada.")
 
-        # USAR TRADUCCIÓN ASÍNCRONA PARA EL GRUPO -1003425756296 / -3425756296
-        use_async = False
-        for config in configs:
-            dest_id = config.get('dest')
-            if dest_id in [-1003425756296, -3425756296]:
-                use_async = True
-                break
-        
-        if use_async:
-            logger.info("Pipeline: Usando traducción ASÍNCRONA para grupo de pruebas...")
-            final_text = await self.smart_fragment_translation_async(text_filtered)
-        else:
-            final_text = self.smart_fragment_translation(text_filtered)
+        logger.info("Pipeline: Usando traducción ASÍNCRONA...")
+        final_text = await self.smart_fragment_translation_async(text_filtered)
             
         if final_text is None:
             logger.warning(f"Pipeline: Traducción fallida en Msg {msg_id}. Usando texto original filtrado como fallback.")
@@ -1189,18 +1178,8 @@ class TelegramReplicator:
             # Si después de editar ya no cumple los filtros, ignoramos la edición
             return
             
-        use_async = False
-        for mapping in mappings:
-            dest_chat_id = mapping.get("chat_id")
-            if dest_chat_id in [-1003425756296, -3425756296]:
-                use_async = True
-                break
-                
-        if use_async:
-            logger.info("Edit: Usando traducción ASÍNCRONA para grupo de pruebas...")
-            final_text = await self.smart_fragment_translation_async(text_filtered)
-        else:
-            final_text = self.smart_fragment_translation(text_filtered)
+        logger.info("Edit: Usando traducción ASÍNCRONA...")
+        final_text = await self.smart_fragment_translation_async(text_filtered)
             
         if final_text is None:
             final_text = text_filtered
