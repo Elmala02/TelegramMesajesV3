@@ -37,13 +37,19 @@ The tone stays positive for gold into the European and US sessions. Las ofertas 
     fallback_result_async = await replicator.smart_fragment_translation_async(test_message)
     print(fallback_result_async)
     
-    print("\n--- TRADUCCIÓN (IA) ---")
-    # Test AI (if key is available)
-    if os.getenv('AI_API_KEY'):
-        ai_result = await replicator.run_ai_filter(test_message)
-        print(ai_result)
-    else:
-        print("AI_API_KEY no encontrada. Saltando prueba de IA.")
+    print("\n--- PRUEBA 2: MENSAJE CON FUENTES ESPECIALES UNICODE, UZBEKO Y CIRÍLICO ---")
+    test_message_2 = """𝗔𝗦𝗦𝗔𝗟𝗢𝗠 𝗔𝗟𝗘𝗞𝗨𝗠 𝗫𝗨𝗥𝗠𝗔𝗧𝗟𝗜   𝗧𝗥𝗔𝗗𝗘𝗥𝗟𝗔𝗥 
+
+ЛАА ХАВЛА ВА ЛАА КУВВАТА ИЛАА БИЛЛАХИ"""
+    print(f"Texto original:\n{test_message_2}")
+    
+    # 1. Probar paso por filtros manuales
+    filtered_2 = replicator.apply_manual_filters(test_message_2)
+    print(f"\nDespués de filtros manuales / normalización:\n{filtered_2}")
+    
+    # 2. Probar traducción asíncrona
+    translated_2 = await replicator.smart_fragment_translation_async(filtered_2)
+    print(f"\nResultado traducción asíncrona:\n{translated_2}")
 
 if __name__ == "__main__":
     asyncio.run(test_translation())

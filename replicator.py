@@ -1,4 +1,5 @@
 import os
+import unicodedata
 import logging
 import re
 import json
@@ -159,8 +160,41 @@ class TelegramReplicator:
             r"\bdenganizin\b": "con permiso", r"\batasizin\b": "por permiso",
             r"\bkurnia\b": "regalo / gracia", r"\bnikmat\b": "bendición",
             r"\bberserah\b": "entregarse", r"\bpasrah\b": "resignarse",
-            r"\bquran\b": "Corán", r"\bsunnah\b": "tradición profética"
+            r"\bquran\b": "Corán", r"\bsunnah\b": "tradición profética",
+            # --- TÉRMINOS UZBEKOS / ASIA CENTRAL Y CIRÍLICO ---
+            # Saludos y términos de trading en uzbeko/ruso
+            r"\bassalomu?\s+al[ae]y?kum\b": "Saludos",
+            r"\bassalom\b": "Saludos",
+            r"\bxurmatli\b": "estimados",
+            r"\bhurmatli\b": "estimados",
+            r"\btraderlar\b": "traders",
+            r"\btreyding\b": "trading",
+            r"\bsavdo\b": "operación",
+            r"\bsavdolar\b": "operaciones",
+            r"\bfoyda\b": "ganancia",
+            r"\bzarar\b": "pérdida",
+            r"\bkirish\b": "entrada",
+            r"\bchiqish\b": "salida",
+            r"\bkutamiz\b": "esperamos",
+            r"\bomad\b": "éxito",
+            r"\bbarchaga\s+omad\b": "éxito a todos",
+            r"\bdiqqat\b": "atención",
+            # Frases religiosas en alfabeto cirílico y variantes
+            r"ЛАА\s+ХАВЛА\s+ВА\s+ЛАА\s+КУВВАТА\s+ИЛАА\s+БИЛЛАХИ": "No hay fuerza ni poder excepto en Dios",
+            r"лаа\s+хавла\s+ва\s+лаа\s+куввата\s+илаа\s+биллахи": "No hay fuerza ni poder excepto en Dios",
+            r"\bla\s+hawla\s+wa\s+la\s+quwwata\s+illa\s+billah\b": "No hay fuerza ni poder excepto en Dios",
+            r"\bбисмиллах\b": "En el nombre de Dios",
+            r"\bалхамдулиллах\b": "Gracias a Dios",
+            r"\биншааллах\b": "Si Dios quiere",
+            r"\bмашааллах\b": "Lo que Dios ha querido",
+            r"\bсубханаллах\b": "Gloria a Dios"
         }
+
+    def normalize_text(self, text: str) -> str:
+        """Normaliza fuentes estilizadas de Telegram (negritas matemáticas, cursivas, etc.) a texto estándar."""
+        if not text:
+            return ""
+        return unicodedata.normalize('NFKC', text)
 
 
     def is_in_schedule(self, schedule_config):
@@ -196,7 +230,7 @@ class TelegramReplicator:
     def apply_manual_filters(self, text, source_name=""):
         """Aplica filtros de reemplazo y descarte (Zoom, reuniones, etc.)"""
         if not text: return None
-        
+        text = self.normalize_text(text)
         text_upper = text.upper()
         
         # 0. DESCARTE: Concurso / Sitio Web / Website
@@ -445,7 +479,7 @@ class TelegramReplicator:
         Versión asíncrona de smart_fragment_translation que no bloquea el event loop.
         """
         if not text: return ""
-
+        text = self.normalize_text(text)
         fragments = re.split(r'(\n|\. |\!|\?)', text)
         result_fragments = []
         
@@ -614,7 +648,15 @@ class TelegramReplicator:
             "mantap": "genial",
             "alhamdullilah": "gracias a Dios",
             "alhamdulillah": "gracias a Dios",
-            "iftar": "cena de ayuno"
+            "iftar": "cena de ayuno",
+            "assalom": "saludos",
+            "xurmatli": "estimados",
+            "hurmatli": "estimados",
+            "traderlar": "traders",
+            "savdo": "operación",
+            "foyda": "ganancia",
+            "zarar": "pérdida",
+            "omad": "éxito"
         }
         
         for word in words:
@@ -1034,7 +1076,7 @@ class TelegramReplicator:
         source_id = str(message.chat_id)
         source_name = configs[0].get('name', 'Unknown') if configs else "Unknown"
         msg_id = message.id
-        original_text = message.text or ""
+        original_text = self.normalize_text(message.text or "")
         
         # Verificar si al menos un destino permite multimedia si no hay texto
         any_media_allowed = any(c.get('allow_media') for c in configs)
@@ -1169,7 +1211,7 @@ class TelegramReplicator:
 
         logger.info(f"Edit: Detectada edición en Msg {msg_id}. Procesando actualización...")
         
-        original_text = message.text or ""
+        original_text = self.normalize_text(message.text or "")
         source_id = str(message.chat_id)
         
         # Reprocesar el texto a través del pipeline de filtros y traducción
