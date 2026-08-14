@@ -264,10 +264,19 @@ class TelegramReplicator:
             logger.info(f"Filtro: Mensaje descartado por contener VIP.")
             return None
 
-        # 3.1 DESCARTE: TikTok (cualquier variación)
-        if "TIKTOK" in text_upper:
-            logger.info(f"Filtro: Mensaje descartado por contener TIKTOK.")
-            return None
+        # 3.1 DESCARTE: Redes Sociales e Instagram (Instagram, TikTok, Facebook, Twitter, YouTube, Discord, etc.)
+        social_keywords = [
+            "INSTAGRAM", "INSTA", "TIKTOK", "TIK TOK", "FACEBOOK", "TWITTER", 
+            "YOUTUBE", "DISCORD", "SNAPCHAT", "THREADS", "PINTEREST",
+            "REDES SOCIALES", "RED SOCIAL", "SOCIAL MEDIA", "MEDIA SOSIAL",
+            "SIGUENOS", "SÍGUENOS", "SIGANOS", "SÍGANOS", "SIGANME", "SÍGANME",
+            "FOLLOW US", "FOLLOW ME", "FOLLOW OUR", "IKUTI KAMI", "SUBSCRIBE",
+            "SUSCRÍBETE", "SUSCRIBETE"
+        ]
+        for kw in social_keywords:
+            if re.search(rf'\b{re.escape(kw)}\b', text_upper):
+                logger.info(f"Filtro: Mensaje descartado por mención de redes sociales / Instagram ({kw}).")
+                return None
 
         # 4. REEMPLAZOS ESPECÍFICOS
         final_text = text

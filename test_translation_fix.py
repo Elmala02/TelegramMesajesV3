@@ -51,5 +51,18 @@ The tone stays positive for gold into the European and US sessions. Las ofertas 
     translated_2 = await replicator.smart_fragment_translation_async(filtered_2)
     print(f"\nResultado traducción asíncrona:\n{translated_2}")
 
+    print("\n--- PRUEBA 3: DESCARTE DE INSTAGRAM Y REDES SOCIALES ---")
+    social_messages = [
+        "Síguenos en Instagram @trading_vip para más señales",
+        "Mira nuestro análisis en Youtube y síguenos en redes sociales",
+        "Join our Discord for trade discussions",
+        "Follow us on TikTok: @gold_trader",
+        "💎 BUY GOLD 5100 - 5105 | SL 5090 | TP1 5115 (Señal limpia)"
+    ]
+    for msg in social_messages:
+        res = replicator.apply_manual_filters(msg)
+        status = "❌ DESCARTADO (Correcto)" if res is None else f"✅ PERMITIDO: {res}"
+        print(f"Mensaje: '{msg}' -> {status}")
+
 if __name__ == "__main__":
     asyncio.run(test_translation())
