@@ -39,6 +39,8 @@ class TelegramReplicator:
         
         self.ai_api_url = os.getenv('AI_API_URL', 'https://apifreellm.com/api/v1/chat')
         self.ai_api_key = os.getenv('AI_API_KEY', '')
+        self.gemini_api_key = os.getenv('GEMINI_API_KEY', os.getenv('AI_API_KEY', ''))
+        self.gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
 
         # Diccionario de reemplazos manuales específicos
         self.manual_replacements = {
@@ -1015,70 +1017,112 @@ class TelegramReplicator:
                 
         return "\n".join(lines)
 
-    async def run_ai_filter(self, text):
-        if not self.ai_api_key: return None
-        # Si la clave parece de Google Gemini, intentamos usar el endpoint oficial si el proxy falla
-        is_gemini_key = self.ai_api_key.startswith("gen-lang-client") or len(self.ai_api_key) > 30
-        
-        system_prompt = (
-            "Actúa como un experto editor financiero y traductor de señales de trading para CLUB 10M.\n\n"
-            "TU OBJETIVO: Traducir íntegramente al ESPAÑOL cualquier análisis de mercado o señal, manteniendo la coherencia técnica y profesional. Translate the entire text to Spanish. Do not leave any English words. Return only Spanish.\n\n"
-            "REGLAS CRÍTICAS:\n"
-            "1. TRADUCCIÓN TOTAL: Si un mensaje contiene párrafos descriptivos en inglés o malayo, TRADÚCELOS COMPLETOS al español con un tono profesional. Ejemplo: 'The tone stays positive' -> 'El tono se mantiene positivo'.\n"
-            "2. PROTECCIÓN TÉCNICA: NO traduzcas ni alteres términos específicos de ejecución: BUY, SELL, ENTRY, SL, TP1-4, GOLD, XAUUSD o los valores numéricos de precio.\n"
-            "3. MEJORA DE ESTILO: Corrige errores gramaticales, elimina slang y asegúrate de que el análisis de mercado suene como un informe de un banco de inversión.\n"
-            "4. BRANDING: Reemplaza cualquier link, usuario (@) o mención de otros canales por 'CLUB 10M'.\n"
-            "5. SIN OMISIONES: No resumas. Traduce cada sección del mensaje original (Impulsores, Resistencia, Apoyo, Sentimiento, etc.).\n"
-            "6. DICCIONARIO MALAYO (Si aplica): Traduce términos como 'junam' (caída), 'lagi' (más), 'jom' (vamos), 'kita' (nosotros) al contexto de trading español.\n\n"
-            "Mensaje a procesar:"
+    def is_gemini_enabled(self, config: dict) -> bool:
+        """Verifica si un destino tiene habilitada la traducción con Gemini."""
+        if not isinstance(config, dict):
+            return False
+        if config.get('use_gemini') is True:
+            return True
+        dest = config.get('dest')
+        # Soporte directo para grupo de prueba 4438757585 / -1004438757585
+        if dest in [-1004438757585, 4438757585, -4438757585]:
+            return True
+        return False
+
+    def is_gemini_dest_id(self, dest_id: int) -> bool:
+        """Verifica si un dest_id tiene habilitado Gemini en REPLICATION_MAP o por ID."""
+        if dest_id in [-1004438757585, 4438757585, -4438757585]:
+            return True
+        for configs in self.replication_map.values():
+            cfg_list = configs if isinstance(configs, list) else [configs]
+            for cfg in cfg_list:
+                if cfg.get('dest') == dest_id and cfg.get('use_gemini') is True:
+                    return True
+        return False
+
+    def sanitize_text(self, text: str) -> str:
+        """Sanitiza menciones y enlaces externos reemplazándolos por la marca oficial CLUB 10M."""
+        if not text:
+            return ""
+        text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', text)
+        text = re.sub(r't\.me/\S+', '👑CLUB 10M', text)
+        return text.strip()
+
+    async def translate_with_gemini(self, text: str) -> str:
+        """
+        Traduce el texto usando la API oficial de Google Gemini con prompt especializado en Forex/Trading.
+        Retorna el texto traducido al español o aplica fallback automático si la API no responde.
+        """
+        if not text:
+            return ""
+
+        gemini_key = os.getenv('GEMINI_API_KEY') or self.gemini_api_key
+        if not gemini_key:
+            logger.warning("Gemini: Clave GEMINI_API_KEY no configurada en .env. Usando fallback estándar.")
+            return await self.smart_fragment_translation_async(text)
+
+        model = os.getenv('GEMINI_MODEL', self.gemini_model) or 'gemini-1.5-flash'
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+
+        system_instruction = (
+            "Eres un traductor y editor financiero experto en señales y análisis de trading de Forex, Oro (XAUUSD) y Cripto para Telegram.\n"
+            "Tu tarea es traducir con la máxima precisión el mensaje al ESPAÑOL manteniendo un formato limpio y profesional.\n\n"
+            "REGLAS ESTRICTAS:\n"
+            "1. TRADUCE TODO EL TEXTO DESCRIPTIVO: Si el mensaje contiene párrafos, explicaciones o frases en inglés, malayo, indonesio, ruso, uzbeko o cualquier otro idioma, tradúcelas completamente al español neutro de trading.\n"
+            "2. PRESERVA TÉRMINOS TÉCNICOS: Conserva EXACTAMENTE y en mayúsculas términos de ejecución como: BUY, SELL, BUY LIMIT, SELL LIMIT, BUY STOP, SELL STOP, ENTRY, SL, STOP LOSS, TP, TP1, TP2, TP3, TP4, TP5, TP6, TP7, TP8, TP9, TP10, TAKE PROFIT, BREAK EVEN, BE, OPEN, HIT, PIPS, PIP, GOLD, XAUUSD.\n"
+            "3. PRESERVA PRECIOS, NÚMEROS Y EMOJIS: No modifiques valores numéricos, rangos de entrada ni elimines emojis o saltos de línea.\n"
+            "4. ELIMINA SLANG RESIDUAL: Traduce expresiones coloquiales malayas (ej. 'junam' -> 'fuerte caída', 'jom fly' -> 'vamos a subir/volar', 'kutip' -> 'asegurar ganancias', 'padu' -> 'sólido/excelente') al contexto financiero en español.\n"
+            "5. RESPUESTA LIMPIA: Devuelve ÚNICAMENTE el texto traducido. No incluyas introducciones ('Aquí está la traducción:'), ni notas, ni explicaciones adicionales."
         )
-        
-        full_prompt = f"{system_prompt}\n{text}"
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": f"{system_instruction}\n\nMensaje a traducir:\n{text}"}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 2048
+            }
+        }
 
         try:
-             async with httpx.AsyncClient() as client:
-                for attempt in range(2):
-                    # Intentar primero con el URL configurado
-                    url = self.ai_api_url
-                    headers = {"Content-Type": "application/json"}
-                    
-                    if "googleapis.com" in url:
-                        # Formato directo de Google Gemini
-                        url = f"{url}?key={self.ai_api_key}"
-                        payload = {"contents": [{"parts": [{"text": full_prompt}]}]}
-                    else:
-                        # Formato Proxy
-                        headers["Authorization"] = f"Bearer {self.ai_api_key}"
-                        payload = {"message": full_prompt, "model": "apifreellm"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload
+                )
 
-                    response = await client.post(url, headers=headers, json=payload, timeout=30.0)
-                    
-                    logger.info(f"AI: Status {response.status_code} para traducción.")
-                    
-                    if response.status_code == 200:
-                        if "googleapis.com" in url:
-                            resp_text = response.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-                        else:
-                            resp_text = response.json().get('response', '').strip()
-                        
-                        if resp_text:
-                            logger.info(f"AI: Traducción exitosa: {resp_text[:50]}...")
-                            return resp_text
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get('candidates', [])
+                    if candidates and 'content' in candidates[0] and 'parts' in candidates[0]['content']:
+                        gemini_text = candidates[0]['content']['parts'][0]['text'].strip()
+                        if gemini_text:
+                            logger.info("Gemini: Traducción IA completada exitosamente.")
+                            return self.apply_spanish_terms(gemini_text)
+                    logger.warning("Gemini: Respuesta sin contenido válido, aplicando fallback estándar.")
+                elif response.status_code == 404:
+                    fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={gemini_key}"
+                    resp_fb = await client.post(fallback_url, headers={"Content-Type": "application/json"}, json=payload)
+                    if resp_fb.status_code == 200:
+                        data = resp_fb.json()
+                        gemini_text = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                        logger.info("Gemini (fallback model): Traducción IA exitosa.")
+                        return self.apply_spanish_terms(gemini_text)
                     else:
-                        logger.error(f"AI: Error en API ({response.status_code}): {response.text}")
-                    
-                    # Si falla con 401 y es clave de Gemini, intentamos endpoint oficial
-                    if response.status_code == 401 and is_gemini_key and "googleapis.com" not in url:
-                        logger.warning("Proxy failed with 401. Trying Gemini Direct Endpoint...")
-                        self.ai_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-                        continue
-                        
-                    await asyncio.sleep(2)
-                
-                return None
+                        logger.error(f"Gemini API error ({response.status_code}): {response.text}")
+                else:
+                    logger.error(f"Gemini API error ({response.status_code}): {response.text}")
+
         except Exception as e:
-            logger.error(f"AI Filter Exception: {e}")
-            return None
+            logger.error(f"Gemini Exception durante traducción: {e}. Aplicando fallback estándar.")
+
+        return await self.smart_fragment_translation_async(text)
 
     # --- PIPELINE ---
     async def process_message(self, message: Message, priority: int, configs: list):
@@ -1112,47 +1156,33 @@ class TelegramReplicator:
             finally:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
-        
 
         logger.info(f"Pipeline: Procesando mensaje de {source_name} ({source_id}). Msg ID: {msg_id}")
 
-        # 1. Aplicar Filtros Manuales (Reemplazos y descartes por Zoom/Clases)
+        # 1. Aplicar Filtros Manuales (Reemplazos y descartes por Zoom/Clases/Redes Sociales)
         text_filtered = self.apply_manual_filters(original_text, source_name)
         if not text_filtered:
-            logger.info(f"Pipeline: Mensaje {msg_id} descartado por filtros manuales (Zoom/Clase).")
+            logger.info(f"Pipeline: Mensaje {msg_id} descartado por filtros manuales.")
             return
 
-        # 2. Normalización y Traducción con IA (DESACTIVADO TEMPORALMENTE)
-        # ai_text = await self.run_ai_filter(text_filtered)
-        # 
-        # if ai_text and ai_text.upper() != "REJECT":
-        #     final_text = ai_text
-        #     logger.info(f"Pipeline: Normalización IA aplicada.")
-        # else:
-        #     # Fallback a traducción manual si la IA falla o no está configurada
-        #     final_text = self.smart_fragment_translation(text_filtered)
-        #     logger.info(f"Pipeline: Fallback a traducción manual aplicada.")
+        # 2. Preparar Traducciones según los motores de cada destino
+        has_gemini_dest = any(self.is_gemini_enabled(c) for c in configs)
+        has_standard_dest = any(not self.is_gemini_enabled(c) for c in configs)
 
-        logger.info("Pipeline: Usando traducción ASÍNCRONA...")
-        final_text = await self.smart_fragment_translation_async(text_filtered)
-            
-        if final_text is None:
-            logger.warning(f"Pipeline: Traducción fallida en Msg {msg_id}. Usando texto original filtrado como fallback.")
-            final_text = text_filtered
-            
-        logger.info(f"Pipeline: Traducción interna del bot aplicada (IA desactivada).")
+        gemini_text = None
+        standard_text = None
 
-        # 3. Sanitización Final (Seguridad extra para links/menciones)
-        # Nota: La marca CLUB 10M se aplica aquí sobre cualquier link/mención residual
-        # que no haya sido capturado por apply_manual_filters
-        final_text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', final_text)
-        final_text = re.sub(r't\.me/\S+', '👑CLUB 10M', final_text)
-        # Las menciones @ ya fueron manejadas en apply_manual_filters, 
-        # pero esto asegura que si aparece algo nuevo sea CLUB 10M
-        
-        final_text = final_text.strip()
+        if has_gemini_dest:
+            logger.info("Pipeline: Traducción con GEMINI IA activada para grupo de prueba.")
+            gemini_res = await self.translate_with_gemini(text_filtered)
+            gemini_text = self.sanitize_text(gemini_res if gemini_res is not None else text_filtered)
 
-        # Publicar en todos los destinos configurados
+        if has_standard_dest:
+            logger.info("Pipeline: Usando traducción ASÍNCRONA estándar para destinos regulares...")
+            std_res = await self.smart_fragment_translation_async(text_filtered)
+            standard_text = self.sanitize_text(std_res if std_res is not None else text_filtered)
+
+        # 3. Publicar en todos los destinos configurados
         for config in configs:
             dest_id = config.get('dest')
             topic_id = config.get('topic')
@@ -1164,8 +1194,11 @@ class TelegramReplicator:
                     clean_prefix = clean_prefix.replace("REENVIADO POR ", "", 1)
                 prefix = f"**REENVIADO POR {clean_prefix}**"
 
+            use_gem = self.is_gemini_enabled(config)
+            dest_final_text = gemini_text if use_gem else standard_text
+
             # Anteponer prefijo al texto si está definido
-            text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
+            text_to_send = f"{prefix}\n\n{dest_final_text}".strip() if prefix and dest_final_text else dest_final_text
 
             # Si el destino no permite media y el mensaje es solo media, saltar
             if not text_to_send and not (message.media and allow_media):
@@ -1178,36 +1211,13 @@ class TelegramReplicator:
                     reply_to=topic_id,
                     file=message.media if allow_media else None
                 )
-                logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id} [prefix='{prefix}'].")
+                engine_name = "Gemini IA" if use_gem else "Estándar"
+                logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id} [{engine_name}, prefix='{prefix}'].")
                 
                 # Guardar en cache para soporte de ediciones posteriores
-                # Incluimos el prefijo Y el texto completo enviado para detectar cambios reales
                 message_cache.add_message(msg_id, sent_msg, prefix=prefix, sent_text=text_to_send)
             except Exception as e:
                 logger.error(f"Pipeline: ERROR enviando Msg {msg_id} a {dest_id}: {e}")
-            
-        # Guardar en DB para registro (Deshabilitado para ahorrar CPU y Memoria)
-        # try:
-        #     parsed_data = self.parse_signal(original_text)
-        #     signal_entry = {
-        #         "source_id": source_id,
-        #         "msg_id": msg_id,
-        #         "asset": parsed_data.get("asset", "UNKNOWN"),
-        #         "direction": parsed_data.get("direction", "UNKNOWN"),
-        #         "entry_min": parsed_data.get("entry_min"),
-        #         "entry_max": parsed_data.get("entry_max"),
-        #         "tp1": parsed_data.get("tp1"),
-        #         "tp2": parsed_data.get("tp2"),
-        #         "tp3": parsed_data.get("tp3"),
-        #         "tp4": parsed_data.get("tp4"),
-        #         "tp5": parsed_data.get("tp5"),
-        #         "sl": parsed_data.get("sl"),
-        #         "raw_text": original_text,
-        #         "formatted_text": final_text
-        #     }
-        #     self.db.save_signal(signal_entry)
-        # except Exception as e:
-        #     logger.error(f"Error guardando señal en DB: {e}")
 
     async def handle_message_edit(self, message: Message):
         """Maneja el evento de edición de un mensaje original usando el cache."""
@@ -1215,30 +1225,31 @@ class TelegramReplicator:
         mappings = message_cache.get_message(msg_id)
         
         if not mappings:
-            # Si no está en cache, lo ignoramos sin romper el bot
             return
 
         logger.info(f"Edit: Detectada edición en Msg {msg_id}. Procesando actualización...")
         
         original_text = self.normalize_text(message.text or "")
-        source_id = str(message.chat_id)
         
-        # Reprocesar el texto a través del pipeline de filtros y traducción
+        # Reprocesar el texto a través del pipeline de filtros
         text_filtered = self.apply_manual_filters(original_text)
         if not text_filtered:
-            # Si después de editar ya no cumple los filtros, ignoramos la edición
             return
-            
-        logger.info("Edit: Usando traducción ASÍNCRONA...")
-        final_text = await self.smart_fragment_translation_async(text_filtered)
-            
-        if final_text is None:
-            final_text = text_filtered
-        
-        # Sanitización extra
-        final_text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', final_text)
-        final_text = re.sub(r't\.me/\S+', '👑CLUB 10M', final_text)
-        final_text = final_text.strip()
+
+        # Precomputar traducciones necesarias según motores de los destinos mapeados
+        has_gemini_edit = any(self.is_gemini_dest_id(m.get("chat_id")) for m in mappings)
+        has_standard_edit = any(not self.is_gemini_dest_id(m.get("chat_id")) for m in mappings)
+
+        gemini_text = None
+        standard_text = None
+
+        if has_gemini_edit:
+            gemini_res = await self.translate_with_gemini(text_filtered)
+            gemini_text = self.sanitize_text(gemini_res if gemini_res is not None else text_filtered)
+
+        if has_standard_edit:
+            std_res = await self.smart_fragment_translation_async(text_filtered)
+            standard_text = self.sanitize_text(std_res if std_res is not None else text_filtered)
         
         # Editar todas las réplicas encontradas en el cache
         for mapping in mappings:
@@ -1246,18 +1257,18 @@ class TelegramReplicator:
                 dest_chat_id = mapping["chat_id"]
                 replicated_msg_id = mapping["replicated_id"]
 
-                # Recuperar prefijo si el mapping lo guardó (compatibilidad hacia atrás)
                 prefix = mapping.get('prefix', '')
                 if prefix:
                     clean_prefix = prefix.replace("**", "")
                     if clean_prefix.startswith("REENVIADO POR "):
                         clean_prefix = clean_prefix.replace("REENVIADO POR ", "", 1)
                     prefix = f"**REENVIADO POR {clean_prefix}**"
+
+                use_gem = self.is_gemini_dest_id(dest_chat_id)
+                final_text = gemini_text if use_gem else standard_text
                 text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
 
-                # --- PROTECCIÓN ANTI-EDICIÓN FANTASMA ---
-                # Si el texto procesado es IGUAL al que enviamos originalmente,
-                # no tiene sentido editar (evita el bug con MessageEdited por link preview)
+                # Protección anti-edición fantasma
                 previously_sent = mapping.get('sent_text', '')
                 if previously_sent and text_to_send.strip() == previously_sent.strip():
                     logger.info(f"Edit: Msg {msg_id} en {dest_chat_id} - texto sin cambios reales, edición omitida.")

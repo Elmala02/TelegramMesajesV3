@@ -1,7 +1,13 @@
 import asyncio
 import os
+import sys
 from dotenv import load_dotenv
 from replicator import TelegramReplicator
+
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 load_dotenv()
 
@@ -51,18 +57,26 @@ The tone stays positive for gold into the European and US sessions. Las ofertas 
     translated_2 = await replicator.smart_fragment_translation_async(filtered_2)
     print(f"\nResultado traducción asíncrona:\n{translated_2}")
 
-    print("\n--- PRUEBA 3: DESCARTE DE INSTAGRAM Y REDES SOCIALES ---")
-    social_messages = [
-        "Síguenos en Instagram @trading_vip para más señales",
-        "Mira nuestro análisis en Youtube y síguenos en redes sociales",
-        "Join our Discord for trade discussions",
-        "Follow us on TikTok: @gold_trader",
-        "💎 BUY GOLD 5100 - 5105 | SL 5090 | TP1 5115 (Señal limpia)"
+    print("\n--- PRUEBA 4: ENRUTAMIENTO SELECTIVO POR DESTINO (GEMINI VS ESTÁNDAR) ---")
+    from config import REPLICATION_MAP
+    test_rep = TelegramReplicator(None, REPLICATION_MAP)
+    
+    test_configs = [
+        {"dest": -1004438757585, "name": "Nuevo Destino (Gemini)", "priority": 1, "use_gemini": True},
+        {"dest": -1003797962974, "name": "GTS VIP (Estándar)", "priority": 1},
+        {"dest": -1003425756296, "name": "SR SNIPER VIP (Estándar)", "priority": 1}
     ]
-    for msg in social_messages:
-        res = replicator.apply_manual_filters(msg)
-        status = "❌ DESCARTADO (Correcto)" if res is None else f"✅ PERMITIDO: {res}"
-        print(f"Mensaje: '{msg}' -> {status}")
+    for cfg in test_configs:
+        is_gem = test_rep.is_gemini_enabled(cfg)
+        engine = "🤖 GEMINI IA" if is_gem else "⚙️ ESTÁNDAR"
+        print(f"Destino {cfg['dest']} ({cfg['name']}) -> Motor: {engine}")
+
+    print("\n--- PRUEBA 5: TRADUCCIÓN CON GEMINI (O FALLBACK SI NO HAY API KEY) ---")
+    malay_signal = "Jom kita fly lagi Gold! Junam kuat tadi tapi sekarang breakout. Kutip profit TP1."
+    print(f"Texto malayo original: {malay_signal}")
+    gem_result = await test_rep.translate_with_gemini(malay_signal)
+    print(f"Resultado Gemini / Fallback: {gem_result}")
 
 if __name__ == "__main__":
     asyncio.run(test_translation())
+
