@@ -37,8 +37,8 @@ REPLICATION_MAP = {
     "@aura_capital1": [
         {"dest": -1005386250677, "name": "Aura Capital", "priority": 1, "allow_media": True, "use_gemini": True}
     ],
-    -1005492244914: [
-        {"dest": -1005302047567, "name": "Grupo 5492244914", "priority": 1, "allow_media": True, "use_gemini": True}
+    -1004308389038: [
+        {"dest": -1003928036121, "name": "Grupo 4308389038", "priority": 1, "allow_media": True, "use_gemini": True}
     ]
 }
 
