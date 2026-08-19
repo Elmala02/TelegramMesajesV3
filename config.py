@@ -33,6 +33,9 @@ REPLICATION_MAP = {
     ],
     -1002455597797: [
         {"dest": -1004438757585, "name": "Nuevo Destino", "priority": 1, "allow_media": True, "use_gemini": True}
+    ],
+    "@aura_capital1": [
+        {"dest": -1005386250677, "name": "Aura Capital", "priority": 1, "allow_media": True}
     ]
 }
 

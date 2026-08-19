@@ -721,6 +721,15 @@ class TelegramReplicator:
             configs = self.replication_map.get(chat_id)
             
             if not configs:
+                try:
+                    chat = await event.get_chat()
+                    username = getattr(chat, 'username', None)
+                    if username:
+                        configs = self.replication_map.get(f"@{username}") or self.replication_map.get(username)
+                except Exception as e_chat:
+                    logger.debug(f"Error obteniendo chat para fallback de username: {e_chat}")
+            
+            if not configs:
                 logger.warning(f"Message from unknown source ID {chat_id}.")
                 return
 
