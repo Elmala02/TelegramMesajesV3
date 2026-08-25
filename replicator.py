@@ -377,11 +377,10 @@ class TelegramReplicator:
         return "".join(result_fragments)
 
     def translate_manually(self, text):
-        """Traduce el texto usando Google Translate preservando términos técnicos."""
+        """Traduce el texto usando Google Translate (y MyMemory como secundario) preservando términos técnicos."""
         if not text: return text
         
         try:
-            # Lista de términos protegidos que NO queremos traducir
             protected_terms = {
                 "XAUUSD/GOLD": "___XAUUSD_GOLD___",
                 "XAU/USD": "___XAU_USD___",
@@ -412,58 +411,45 @@ class TelegramReplicator:
                 "TP": "___TP___",
             }
             
-            # 1. Proteger términos técnicos con placeholders
             temp_text = text
             for term, placeholder in protected_terms.items():
                 temp_text = re.sub(rf'\b{term}\b', placeholder, temp_text, flags=re.IGNORECASE)
             
-            # 2. Traducir el resto con Google Translate (online, sin API key)
             translated = None
+            # 1. Intentar GoogleTranslate (primario)
             try:
                 translated = GoogleTranslator(source='auto', target='es').translate(temp_text)
+                if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
+                    logger.warning("GoogleTranslate devolvió respuesta HTTP 500. Pasando a traductor secundario (MyMemory).")
+                    translated = None
             except Exception as e_gt:
-                logger.warning(f"GoogleTranslate fallo inicial: {e_gt}. Probando MyMemory.")
+                logger.warning(f"GoogleTranslate fallo inicial: {e_gt}. Pasando a traductor secundario (MyMemory).")
             
-            # Validar resultado vacío y probar MyMemory
+            # 2. Intentar MyMemoryTranslator (secundario)
             if not translated or not isinstance(translated, str):
                 try:
                     translated = MyMemoryTranslator(source='auto', target='es').translate(temp_text)
+                    if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated):
+                        logger.warning("MyMemoryTranslator devolvió aviso de límite o error.")
+                        translated = None
                 except Exception as e_mm:
-                    logger.error(f"MyMemory fallo también: {e_mm}")
+                    logger.error(f"MyMemoryTranslator fallo también: {e_mm}")
                     translated = None
-            
-            # Validar si Google devolvió un texto de Error 500 en lugar de la traducción
-            if translated and isinstance(translated, str) and "Error 500" in translated and "Server Error" in translated:
-                raise Exception("Google Translate devolvió la página de Error HTTP 500 en lugar de texto traducido.")
 
-            # Si seguimos sin traducción, aplicar fallback básico y devolver algo usable
+            # 3. Si todos los motores fallaron, retornar None para cancelar el envío
             if not translated or not isinstance(translated, str):
-                logger.warning("Fallback: usando traducción básica por ausencia de respuesta de traductores.")
-                basic = self.basic_fallback_translation(text)
-                return self.apply_spanish_terms(basic.strip())
+                logger.error("Fallo definitivo: Todos los traductores (GoogleTranslate y MyMemory) fallaron.")
+                return None
 
-            # 3. Restaurar términos técnicos originales
-            # Usamos replace directo porque los placeholders son únicos
             for term, placeholder in protected_terms.items():
                 translated = translated.replace(placeholder, term)
                 
-            # Asegurar que "HIT" esté en mayúsculas si el usuario lo prefiere así
             translated = re.sub(rf'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
-
-            # 0. CORRECCIÓN CRÍTICA: "golpe" -> "HIT"
-            # Si el traductor convirtió "Hit" en "golpe" o "Golpe", lo revertimos.
-            # También arregla si tradujo el placeholder ___HIT___ a ___GOLPE___ o _GOLPE_
             translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
-
-            # --- POST-TRADUCCIÓN: FILTROS DE SEGURIDAD PARA MALAYO Y NOMBRES ---
-            # A veces el traductor revive palabras o no traduce ciertas cosas del malayo.
-            # Aquí forzamos una última limpieza.
             
-            # 1. Reemplazo forzado de nombres que a veces se escapan (Kim, Sunny)
             translated = re.sub(r'\bkim\b', 'Jose', translated, flags=re.IGNORECASE)
             translated = re.sub(r'\bsunny\b', 'jose', translated, flags=re.IGNORECASE)
 
-            # 2. Reemplazo de palabras malayas residuales comunes (Reforzado)
             malay_residuals = {
                 r'\blagi\b': 'de nuevo',
                 r'\bjom\b': 'vamos',
@@ -481,13 +467,13 @@ class TelegramReplicator:
             return self.apply_spanish_terms(translated.strip())
             
         except Exception as e:
-            logger.error(f"Error en traducción online: {e}")
-            # Fallback definitivo: al menos normalizar términos a español
-            return self.apply_spanish_terms(text.strip())
+            logger.error(f"Excepción en traducción manual: {e}")
+            return None
 
     async def smart_fragment_translation_async(self, text: str) -> str:
         """
         Versión asíncrona de smart_fragment_translation que no bloquea el event loop.
+        Retorna None si la traducción de fragmentos requeridos falla.
         """
         if not text: return ""
         text = self.normalize_text(text)
@@ -525,7 +511,7 @@ class TelegramReplicator:
                         translated_fragment = await self.translate_manually_async(fragment)
                         
                         if translated_fragment is None:
-                            logger.error(f"Fallo crítico en traducción asíncrona. Bloqueando el mensaje completo.")
+                            logger.error(f"Fallo crítico en traducción asíncrona de fragmento '{clean_fragment}'. Cancelando mensaje.")
                             return None
 
                         if any(w in translated_fragment.lower() for w in ["junam", "kutip", "kita", "fly"]):
@@ -538,7 +524,7 @@ class TelegramReplicator:
                     logger.warning(f"Error en detección/traducción de fragmento '{clean_fragment}': {e}. Intentando traducción de fallback asíncrona.")
                     translated_fragment = await self.translate_manually_async(fragment)
                     if translated_fragment is None:
-                        logger.error(f"Fallo crítico en traducción de fallback asíncrona. Bloqueando el mensaje completo.")
+                        logger.error(f"Fallo crítico en traducción de fallback asíncrona de '{clean_fragment}'. Cancelando mensaje.")
                         return None
                     result_fragments.append(translated_fragment)
             else:
@@ -547,7 +533,7 @@ class TelegramReplicator:
         return "".join(result_fragments)
 
     async def translate_manually_async(self, text):
-        """Traduce el texto de forma asíncrona usando asyncio.to_thread para no bloquear."""
+        """Traduce el texto de forma asíncrona usando GoogleTranslate (primario) y MyMemory (secundario)."""
         if not text: return text
         
         try:
@@ -586,31 +572,34 @@ class TelegramReplicator:
                 temp_text = re.sub(rf'\b{term}\b', placeholder, temp_text, flags=re.IGNORECASE)
             
             translated = None
+            # 1. Intentar GoogleTranslate (primario)
             try:
-                # Usar asyncio.to_thread para GoogleTranslator bloqueante
                 translated = await asyncio.to_thread(
                     lambda: GoogleTranslator(source='auto', target='es').translate(temp_text)
                 )
+                if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
+                    logger.warning("GoogleTranslate asíncrono devolvió respuesta HTTP 500. Pasando a traductor secundario (MyMemory).")
+                    translated = None
             except Exception as e_gt:
-                logger.warning(f"GoogleTranslate asíncrono fallo inicial: {e_gt}. Probando MyMemory asíncrono.")
+                logger.warning(f"GoogleTranslate asíncrono fallo inicial: {e_gt}. Pasando a traductor secundario (MyMemory).")
             
+            # 2. Intentar MyMemoryTranslator (secundario)
             if not translated or not isinstance(translated, str):
                 try:
-                    # Usar asyncio.to_thread para MyMemoryTranslator bloqueante
                     translated = await asyncio.to_thread(
                         lambda: MyMemoryTranslator(source='auto', target='es').translate(temp_text)
                     )
+                    if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated):
+                        logger.warning("MyMemoryTranslator asíncrono devolvió aviso de límite o error.")
+                        translated = None
                 except Exception as e_mm:
-                    logger.error(f"MyMemory asíncrono fallo también: {e_mm}")
+                    logger.error(f"MyMemoryTranslator asíncrono fallo también: {e_mm}")
                     translated = None
-            
-            if translated and isinstance(translated, str) and "Error 500" in translated and "Server Error" in translated:
-                raise Exception("Google Translate devolvió la página de Error HTTP 500.")
 
+            # 3. Si todos los motores fallaron, retornar None para cancelar el envío
             if not translated or not isinstance(translated, str):
-                logger.warning("Fallback asíncrono: usando traducción básica.")
-                basic = self.basic_fallback_translation(text)
-                return self.apply_spanish_terms(basic.strip())
+                logger.error("Fallo definitivo asíncrono: Todos los traductores (GoogleTranslate y MyMemory) fallaron.")
+                return None
 
             for term, placeholder in protected_terms.items():
                 translated = translated.replace(placeholder, term)
@@ -638,8 +627,8 @@ class TelegramReplicator:
             return self.apply_spanish_terms(translated.strip())
             
         except Exception as e:
-            logger.error(f"Error en traducción asíncrona: {e}")
-            return self.apply_spanish_terms(text.strip())
+            logger.error(f"Excepción en traducción asíncrona: {e}")
+            return None
 
     def translate_word_by_word(self, text):
         """Traduce palabras individuales si la traducción de la frase no fue suficiente."""
@@ -1068,10 +1057,18 @@ class TelegramReplicator:
         gemini_key = os.getenv('GEMINI_API_KEY') or self.gemini_api_key
         if not gemini_key:
             logger.warning("Gemini: Clave GEMINI_API_KEY no configurada en .env. Usando fallback estándar.")
-            return await self.smart_fragment_translation_async(text)
+    async def translate_with_gemini(self, text: str) -> str:
+        """
+        Traduce el texto usando la API oficial de Google Gemini con prompt especializado en Forex/Trading.
+        Prueba múltiples modelos de Gemini (1.5-flash, 2.0-flash) y si la API no responde, aplica fallback al traductor secundario.
+        """
+        if not text:
+            return ""
 
-        model = os.getenv('GEMINI_MODEL', self.gemini_model) or 'gemini-1.5-flash'
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+        gemini_key = os.getenv('GEMINI_API_KEY') or self.gemini_api_key
+        if not gemini_key:
+            logger.warning("Gemini: Clave GEMINI_API_KEY no configurada. Usando traductor secundario de respaldo.")
+            return await self.smart_fragment_translation_async(text)
 
         system_instruction = (
             "Eres un traductor y editor financiero experto en señales y análisis de trading de Forex, Oro (XAUUSD) y Cripto para Telegram.\n"
@@ -1098,39 +1095,41 @@ class TelegramReplicator:
             }
         }
 
+        # Modelos a intentar en orden en caso de 404 o indisponibilidad
+        models_to_try = [
+            os.getenv('GEMINI_MODEL', self.gemini_model) or 'gemini-1.5-flash',
+            'gemini-2.0-flash',
+            'gemini-1.5-pro'
+        ]
+        seen = set()
+        models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
+
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(
-                    url,
-                    headers={"Content-Type": "application/json"},
-                    json=payload
-                )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    candidates = data.get('candidates', [])
-                    if candidates and 'content' in candidates[0] and 'parts' in candidates[0]['content']:
-                        gemini_text = candidates[0]['content']['parts'][0]['text'].strip()
-                        if gemini_text:
-                            logger.info("Gemini: Traducción IA completada exitosamente.")
-                            return self.apply_spanish_terms(gemini_text)
-                    logger.warning("Gemini: Respuesta sin contenido válido, aplicando fallback estándar.")
-                elif response.status_code == 404:
-                    fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={gemini_key}"
-                    resp_fb = await client.post(fallback_url, headers={"Content-Type": "application/json"}, json=payload)
-                    if resp_fb.status_code == 200:
-                        data = resp_fb.json()
-                        gemini_text = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                        logger.info("Gemini (fallback model): Traducción IA exitosa.")
-                        return self.apply_spanish_terms(gemini_text)
-                    else:
-                        logger.error(f"Gemini API error ({response.status_code}): {response.text}")
-                else:
-                    logger.error(f"Gemini API error ({response.status_code}): {response.text}")
-
+                for model in models_to_try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+                    try:
+                        response = await client.post(
+                            url,
+                            headers={"Content-Type": "application/json"},
+                            json=payload
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            candidates = data.get('candidates', [])
+                            if candidates and 'content' in candidates[0] and 'parts' in candidates[0]['content']:
+                                gemini_text = candidates[0]['content']['parts'][0]['text'].strip()
+                                if gemini_text:
+                                    logger.info(f"Gemini ({model}): Traducción IA completada exitosamente.")
+                                    return self.apply_spanish_terms(gemini_text)
+                        else:
+                            logger.warning(f"Gemini API model '{model}' devolvió status {response.status_code}. Intentando modelo de reserva...")
+                    except Exception as e_mod:
+                        logger.warning(f"Excepción consultando Gemini modelo '{model}': {e_mod}")
         except Exception as e:
-            logger.error(f"Gemini Exception durante traducción: {e}. Aplicando fallback estándar.")
+            logger.error(f"Gemini Exception durante traducción: {e}.")
 
+        logger.warning("Gemini: Todos los modelos de IA fallaron o no están disponibles. Pasando a traducción secundaria de respaldo.")
         return await self.smart_fragment_translation_async(text)
 
     # --- PIPELINE ---
@@ -1184,12 +1183,12 @@ class TelegramReplicator:
         if has_gemini_dest:
             logger.info("Pipeline: Traducción con GEMINI IA activada para grupo de prueba.")
             gemini_res = await self.translate_with_gemini(text_filtered)
-            gemini_text = self.sanitize_text(gemini_res if gemini_res is not None else text_filtered)
+            gemini_text = self.sanitize_text(gemini_res) if gemini_res is not None else None
 
         if has_standard_dest:
             logger.info("Pipeline: Usando traducción ASÍNCRONA estándar para destinos regulares...")
             std_res = await self.smart_fragment_translation_async(text_filtered)
-            standard_text = self.sanitize_text(std_res if std_res is not None else text_filtered)
+            standard_text = self.sanitize_text(std_res) if std_res is not None else None
 
         # 3. Publicar en todos los destinos configurados
         for config in configs:
@@ -1205,6 +1204,15 @@ class TelegramReplicator:
 
             use_gem = self.is_gemini_enabled(config)
             dest_final_text = gemini_text if use_gem else standard_text
+
+            # SI EL TEXTO ERA REQUERIDO PERO LA TRADUCCIÓN FALLÓ COMPLETAMENTE (dest_final_text IS NONE):
+            if dest_final_text is None and text_filtered:
+                engine_name = "Gemini IA (y traductores de respaldo)" if use_gem else "Traducción Estándar (Google/MyMemory)"
+                logger.error(
+                    f"Pipeline: MENSAJE DESCARTADO - Msg {msg_id} NO ENVIADO a {dest_id} ({config.get('name', 'Unknown')}). "
+                    f"Razón: Fallaron todos los motores de traducción [{engine_name}]."
+                )
+                continue
 
             # Anteponer prefijo al texto si está definido
             text_to_send = f"{prefix}\n\n{dest_final_text}".strip() if prefix and dest_final_text else dest_final_text
@@ -1254,11 +1262,11 @@ class TelegramReplicator:
 
         if has_gemini_edit:
             gemini_res = await self.translate_with_gemini(text_filtered)
-            gemini_text = self.sanitize_text(gemini_res if gemini_res is not None else text_filtered)
+            gemini_text = self.sanitize_text(gemini_res) if gemini_res is not None else None
 
         if has_standard_edit:
             std_res = await self.smart_fragment_translation_async(text_filtered)
-            standard_text = self.sanitize_text(std_res if std_res is not None else text_filtered)
+            standard_text = self.sanitize_text(std_res) if std_res is not None else None
         
         # Editar todas las réplicas encontradas en el cache
         for mapping in mappings:
@@ -1275,6 +1283,14 @@ class TelegramReplicator:
 
                 use_gem = self.is_gemini_dest_id(dest_chat_id)
                 final_text = gemini_text if use_gem else standard_text
+
+                if final_text is None and text_filtered:
+                    logger.error(
+                        f"Edit: EDICIÓN OMITIDA - Msg {msg_id} NO ACTUALIZADO en {dest_chat_id}. "
+                        f"Razón: Fallaron todos los motores de traducción al procesar la edición."
+                    )
+                    continue
+
                 text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
 
                 # Protección anti-edición fantasma
