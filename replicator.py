@@ -1049,25 +1049,15 @@ class TelegramReplicator:
     async def translate_with_gemini(self, text: str) -> str:
         """
         Traduce el texto usando la API oficial de Google Gemini con prompt especializado en Forex/Trading.
-        Retorna el texto traducido al español o aplica fallback automático si la API no responde.
+        Prueba múltiples modelos de Gemini (1.5-flash, 2.0-flash) y si la API no responde, aplica fallback a los traductores secundarios (Google / MyMemory).
+        Retorna el texto traducido o None si la IA y los traductores de respaldo fallan.
         """
         if not text:
             return ""
 
         gemini_key = os.getenv('GEMINI_API_KEY') or self.gemini_api_key
         if not gemini_key:
-            logger.warning("Gemini: Clave GEMINI_API_KEY no configurada en .env. Usando fallback estándar.")
-    async def translate_with_gemini(self, text: str) -> str:
-        """
-        Traduce el texto usando la API oficial de Google Gemini con prompt especializado en Forex/Trading.
-        Prueba múltiples modelos de Gemini (1.5-flash, 2.0-flash) y si la API no responde, aplica fallback al traductor secundario.
-        """
-        if not text:
-            return ""
-
-        gemini_key = os.getenv('GEMINI_API_KEY') or self.gemini_api_key
-        if not gemini_key:
-            logger.warning("Gemini: Clave GEMINI_API_KEY no configurada. Usando traductor secundario de respaldo.")
+            logger.warning("Gemini: Clave GEMINI_API_KEY no configurada. Pasando directamente a traductores de respaldo (Google / MyMemory).")
             return await self.smart_fragment_translation_async(text)
 
         system_instruction = (
