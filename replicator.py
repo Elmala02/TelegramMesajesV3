@@ -376,7 +376,24 @@ class TelegramReplicator:
             
         return "".join(result_fragments)
 
-    def translate_manually(self, text):
+    def get_mymemory_lang(self, lang_code: str) -> str:
+        """Convierte código de idioma corto a nombre compatible con MyMemoryTranslator."""
+        mapping = {
+            'en': 'english',
+            'ms': 'malay',
+            'ru': 'russian',
+            'uz': 'uzbek',
+            'id': 'indonesian',
+            'fr': 'french',
+            'de': 'german',
+            'ar': 'arabic',
+            'zh': 'chinese simplified',
+            'ja': 'japanese',
+            'es': 'spanish'
+        }
+        return mapping.get(str(lang_code).lower() if lang_code else 'en', 'english')
+
+    def translate_manually(self, text, detected_lang='en'):
         """Traduce el texto usando Google Translate (y MyMemory como secundario) preservando términos técnicos."""
         if not text: return text
         
@@ -428,8 +445,9 @@ class TelegramReplicator:
             # 2. Intentar MyMemoryTranslator (secundario)
             if not translated or not isinstance(translated, str):
                 try:
-                    translated = MyMemoryTranslator(source='auto', target='es').translate(temp_text)
-                    if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated):
+                    src_name = self.get_mymemory_lang(detected_lang)
+                    translated = MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
+                    if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated or "INVALID SOURCE" in translated.upper()):
                         logger.warning("MyMemoryTranslator devolvió aviso de límite o error.")
                         translated = None
                 except Exception as e_mm:
@@ -508,7 +526,7 @@ class TelegramReplicator:
                     lang = 'en' if is_english_manual else ('ms' if any(w in clean_fragment.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"]) else detect(clean_fragment))
                     
                     if lang != 'es':
-                        translated_fragment = await self.translate_manually_async(fragment)
+                        translated_fragment = await self.translate_manually_async(fragment, detected_lang=lang)
                         
                         if translated_fragment is None:
                             logger.error(f"Fallo crítico en traducción asíncrona de fragmento '{clean_fragment}'. Cancelando mensaje.")
@@ -532,7 +550,7 @@ class TelegramReplicator:
             
         return "".join(result_fragments)
 
-    async def translate_manually_async(self, text):
+    async def translate_manually_async(self, text, detected_lang='en'):
         """Traduce el texto de forma asíncrona usando GoogleTranslate (primario) y MyMemory (secundario)."""
         if not text: return text
         
@@ -583,13 +601,14 @@ class TelegramReplicator:
             except Exception as e_gt:
                 logger.warning(f"GoogleTranslate asíncrono fallo inicial: {e_gt}. Pasando a traductor secundario (MyMemory).")
             
-            # 2. Intentar MyMemoryTranslator (secundario)
+            # 2. Intentar MyMemoryTranslator (secundario con idioma origen correcto)
             if not translated or not isinstance(translated, str):
                 try:
+                    src_name = self.get_mymemory_lang(detected_lang)
                     translated = await asyncio.to_thread(
-                        lambda: MyMemoryTranslator(source='auto', target='es').translate(temp_text)
+                        lambda: MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
                     )
-                    if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated):
+                    if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated or "INVALID SOURCE" in translated.upper()):
                         logger.warning("MyMemoryTranslator asíncrono devolvió aviso de límite o error.")
                         translated = None
                 except Exception as e_mm:
