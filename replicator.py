@@ -1108,7 +1108,9 @@ class TelegramReplicator:
         models_to_try = [
             os.getenv('GEMINI_MODEL', self.gemini_model) or 'gemini-1.5-flash',
             'gemini-2.0-flash',
-            'gemini-1.5-pro'
+            'gemini-1.5-pro',
+            'gemini-1.0-pro',
+            'gemini-pro'
         ]
         seen = set()
         models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
