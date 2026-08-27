@@ -1133,6 +1133,7 @@ class TelegramReplicator:
                                     return self.apply_spanish_terms(gemini_text)
                         else:
                             logger.warning(f"Gemini API model '{model}' devolvió status {response.status_code}. Intentando modelo de reserva...")
+                            logger.warning(f"Respuesta de Gemini: {response.text}")
                     except Exception as e_mod:
                         logger.warning(f"Excepción consultando Gemini modelo '{model}': {e_mod}")
         except Exception as e:
