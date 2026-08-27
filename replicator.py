@@ -1106,11 +1106,9 @@ class TelegramReplicator:
 
         # Modelos a intentar en orden en caso de 404 o indisponibilidad
         models_to_try = [
-            os.getenv('GEMINI_MODEL', self.gemini_model) or 'gemini-1.5-flash',
-            'gemini-2.0-flash',
-            'gemini-1.5-pro',
-            'gemini-1.0-pro',
-            'gemini-pro'
+            os.getenv('GEMINI_MODEL', self.gemini_model) or 'gemini-3.6-flash',
+            'gemini-3.6-flash-8b',
+            'gemini-3.6-pro'
         ]
         seen = set()
         models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
