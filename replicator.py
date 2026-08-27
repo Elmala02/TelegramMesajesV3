@@ -39,7 +39,7 @@ class TelegramReplicator:
         
         self.ai_api_url = os.getenv('AI_API_URL', 'https://apifreellm.com/api/v1/chat')
         self.ai_api_key = os.getenv('AI_API_KEY', '')
-        self.gemini_api_key = os.getenv('GEMINI_API_KEY', os.getenv('AI_API_KEY', ''))
+        self.gemini_api_key = os.getenv('GEMINI_API_KEY', os.getenv('AI_API_KEY', '')).strip()
         self.gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
 
         # Diccionario de reemplazos manuales específicos
@@ -1074,7 +1074,7 @@ class TelegramReplicator:
         if not text:
             return ""
 
-        gemini_key = os.getenv('GEMINI_API_KEY') or self.gemini_api_key
+        gemini_key = (os.getenv('GEMINI_API_KEY') or self.gemini_api_key or "").strip()
         if not gemini_key:
             logger.warning("Gemini: Clave GEMINI_API_KEY no configurada. Pasando directamente a traductores de respaldo (Google / MyMemory).")
             return await self.smart_fragment_translation_async(text)
