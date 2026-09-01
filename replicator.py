@@ -1085,6 +1085,31 @@ class TelegramReplicator:
                     return True
         return False
 
+    def is_face_detection_enabled(self, source_id, configs: list) -> bool:
+        """Verifica si la detección de rostros está habilitada exclusivamente para los grupos autorizados (-1004438757585 y -1004308389038)."""
+        allowed_ids = {
+            -1004438757585, 4438757585, -4438757585,
+            -1004308389038, 4308389038, -4308389038
+        }
+        try:
+            if int(source_id) in allowed_ids:
+                return True
+        except (ValueError, TypeError):
+            pass
+
+        if isinstance(configs, list):
+            for cfg in configs:
+                dest = cfg.get('dest') if isinstance(cfg, dict) else None
+                try:
+                    if dest and int(dest) in allowed_ids:
+                        return True
+                except (ValueError, TypeError):
+                    pass
+                if cfg.get('enable_face_detection') is True:
+                    return True
+
+        return False
+
     def sanitize_text(self, text: str) -> str:
         """Sanitiza menciones, enlaces externos y limpia etiquetas HTML/custom emojis corruptas."""
         if not text:
@@ -1203,10 +1228,12 @@ class TelegramReplicator:
                     logger.warning(f"Pipeline: Mensaje {msg_id} BLOQUEADO - QR detectado en la imagen.")
                     return # 🔥 BLOQUEA EL MENSAJE
 
-                gemini_key = (os.getenv('GEMINI_API_KEY') or self.gemini_api_key or "").strip()
-                if await face_detector.tiene_rostro_async(temp_path, gemini_key=gemini_key):
-                    logger.warning(f"Pipeline: Mensaje {msg_id} BLOQUEADO - Rostro humano detectado en la imagen por IA / Visión.")
-                    return # 🔥 BLOQUEA EL MENSAJE
+                # Detección de rostros SOLO habilitada para los grupos autorizados (-1004438757585 y -1004308389038)
+                if self.is_face_detection_enabled(source_id, configs):
+                    gemini_key = (os.getenv('GEMINI_API_KEY') or self.gemini_api_key or "").strip()
+                    if await face_detector.tiene_rostro_async(temp_path, gemini_key=gemini_key):
+                        logger.warning(f"Pipeline: Mensaje {msg_id} BLOQUEADO - Rostro humano detectado en la imagen por IA / Visión (Grupo restringido).")
+                        return # 🔥 BLOQUEA EL MENSAJE
             except Exception as e:
                 logger.error(f"Error procesando análisis de imagen en Msg {msg_id}: {e}")
             finally:
