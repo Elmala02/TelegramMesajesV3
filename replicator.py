@@ -17,6 +17,7 @@ from config import PROMO_TRIGGERS
 from database import TradingDB
 import message_cache
 import qr_detector
+import face_detector
 
 # Configure logging
 logging.basicConfig(
@@ -1193,18 +1194,21 @@ class TelegramReplicator:
             logger.info(f"Pipeline: Mensaje {msg_id} descartado por ser un GIF.")
             return
 
-        # 0.1 CONTROL DE QR CODES
+        # 0.1 CONTROL DE QR CODES Y ROSTROS HUMANOS (IA / OPENCV)
         if message.photo:
-            temp_path = f"temp_qr_{msg_id}.jpg"
+            temp_path = f"temp_img_{msg_id}.jpg"
             try:
                 await message.download_media(file=temp_path)
                 if qr_detector.tiene_qr(temp_path):
                     logger.warning(f"Pipeline: Mensaje {msg_id} BLOQUEADO - QR detectado en la imagen.")
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
+                    return # 🔥 BLOQUEA EL MENSAJE
+
+                gemini_key = (os.getenv('GEMINI_API_KEY') or self.gemini_api_key or "").strip()
+                if await face_detector.tiene_rostro_async(temp_path, gemini_key=gemini_key):
+                    logger.warning(f"Pipeline: Mensaje {msg_id} BLOQUEADO - Rostro humano detectado en la imagen por IA / Visión.")
                     return # 🔥 BLOQUEA EL MENSAJE
             except Exception as e:
-                logger.error(f"Error procesando QR en Msg {msg_id}: {e}")
+                logger.error(f"Error procesando análisis de imagen en Msg {msg_id}: {e}")
             finally:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
