@@ -193,10 +193,14 @@ class TelegramReplicator:
         }
 
     def normalize_text(self, text: str) -> str:
-        """Normaliza fuentes estilizadas de Telegram (negritas matemáticas, cursivas, etc.) a texto estándar."""
+        """Normaliza fuentes estilizadas de Telegram (negritas matemáticas, cursivas, etc.) a texto estándar y limpia tags residuales."""
         if not text:
             return ""
-        return unicodedata.normalize('NFKC', text)
+        text = unicodedata.normalize('NFKC', text)
+        # Limpiar etiquetas HTML de custom emojis o tags corruptos de Telegram
+        text = re.sub(r'</?g(?:\s+[^>]*)?>', '', text)
+        text = re.sub(r'</?(?:tg-emoji|emoji)(?:\s+[^>]*)?>', '', text)
+        return text
 
 
     def is_in_schedule(self, schedule_config):
@@ -399,33 +403,33 @@ class TelegramReplicator:
         
         try:
             protected_terms = {
-                "XAUUSD/GOLD": "___XAUUSD_GOLD___",
-                "XAU/USD": "___XAU_USD___",
-                "BUY GOLD": "___BG___",
-                "SELL GOLD": "___SG___",
-                "BUY": "___B___",
-                "SELL": "___S___",
-                "STOP LOSS": "___SL___",
-                "SL": "___SL___",
-                "TP1": "___TP1___",
-                "TP2": "___TP2___",
-                "TP3": "___TP3___",
-                "TP4": "___TP4___",
-                "TP5": "___TP5___",
-                "TP6": "___TP6___",
-                "TP7": "___TP7___",
-                "TP8": "___TP8___",
-                "TP9": "___TP9___",
-                "TP10": "___TP10___",
-                "TAKE PROFIT": "___TP___",
-                "ENTRY": "___E___",
-                "OPEN": "___O___",
-                "BE": "___BE___",
-                "BREAK EVEN": "___BE___",
-                "XAUUSD": "___XAU___",
-                "GOLD": "___G___",
-                "HIT": "___HIT___",
-                "TP": "___TP___",
+                "XAUUSD/GOLD": "PROTECTEDTOKENXAUUSDGOLD",
+                "XAU/USD": "PROTECTEDTOKENXAUUSD",
+                "BUY GOLD": "PROTECTEDTOKENBUYGOLD",
+                "SELL GOLD": "PROTECTEDTOKENSELLGOLD",
+                "BUY": "PROTECTEDTOKENBUY",
+                "SELL": "PROTECTEDTOKENSELL",
+                "STOP LOSS": "PROTECTEDTOKENSTOPLOSS",
+                "SL": "PROTECTEDTOKENSL",
+                "TP1": "PROTECTEDTOKENTPONE",
+                "TP2": "PROTECTEDTOKENTPTWO",
+                "TP3": "PROTECTEDTOKENTPTHREE",
+                "TP4": "PROTECTEDTOKENTPFOUR",
+                "TP5": "PROTECTEDTOKENTPFIVE",
+                "TP6": "PROTECTEDTOKENTPSIX",
+                "TP7": "PROTECTEDTOKENTPSEVEN",
+                "TP8": "PROTECTEDTOKENTPEIGHT",
+                "TP9": "PROTECTEDTOKENTPNINE",
+                "TP10": "PROTECTEDTOKENTPTEN",
+                "TAKE PROFIT": "PROTECTEDTOKENTAKEPROFIT",
+                "ENTRY": "PROTECTEDTOKENENTRY",
+                "OPEN": "PROTECTEDTOKENOPEN",
+                "BE": "PROTECTEDTOKENBREAKEVEN",
+                "BREAK EVEN": "PROTECTEDTOKENBREAKEVEN",
+                "XAUUSD": "PROTECTEDTOKENXAU",
+                "GOLD": "PROTECTEDTOKENGOLD",
+                "HIT": "PROTECTEDTOKENHIT",
+                "TP": "PROTECTEDTOKENTP",
             }
             
             temp_text = text
@@ -459,8 +463,13 @@ class TelegramReplicator:
                 logger.error("Fallo definitivo: Todos los traductores (GoogleTranslate y MyMemory) fallaron.")
                 return None
 
+            # Restaurar términos protegidos
             for term, placeholder in protected_terms.items():
                 translated = translated.replace(placeholder, term)
+
+            # Limpiar etiquetas HTML de custom emojis o tags corruptos producidas por el traductor
+            translated = re.sub(r'</?g(?:\s+[^>]*)?>', '', translated)
+            translated = re.sub(r'</?(?:tg-emoji|emoji)(?:\s+[^>]*)?>', '', translated)
                 
             translated = re.sub(rf'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
             translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
@@ -1058,11 +1067,17 @@ class TelegramReplicator:
         return False
 
     def sanitize_text(self, text: str) -> str:
-        """Sanitiza menciones y enlaces externos reemplazándolos por la marca oficial CLUB 10M."""
+        """Sanitiza menciones, enlaces externos y limpia etiquetas HTML/custom emojis corruptas."""
         if not text:
             return ""
         text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', text)
         text = re.sub(r't\.me/\S+', '👑CLUB 10M', text)
+
+        # Limpiar etiquetas HTML de custom emojis o tags corruptos (ej. <g id="2">)
+        text = re.sub(r'</?g(?:\s+[^>]*)?>', '', text)
+        text = re.sub(r'</?(?:tg-emoji|emoji)(?:\s+[^>]*)?>', '', text)
+        # Limpiar viñetas o puntos huérfanos residuales al inicio de línea
+        text = re.sub(r'^[·•\s]+(?=[A-Za-z0-9ÁÉÍÓÚáéíóú💎👑✅])', '', text, flags=re.MULTILINE)
         return text.strip()
 
     async def translate_with_gemini(self, text: str) -> str:
