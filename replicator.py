@@ -59,7 +59,18 @@ class TelegramReplicator:
             r"\bkim44\b": "Jose",
             r"\bkim\b": "Jose",
             r"\bKim\b": "Jose",
-             r"\bKIM\b": "Jose",
+            r"\bKIM\b": "Jose",
+            r"\bSezir\b": "@josejaqueoficial",
+            r"\bsezir\b": "@josejaqueoficial",
+            r":Addushi": ":jose",
+            r"\bAddushi\b": "jose",
+            r"\baddushi\b": "jose",
+            r"\bAllah\b": "dios",
+            r"\ballah\b": "dios",
+            r"\bAKTIV\b": "act",
+            r"\baktiv\b": "act",
+            r"\bKOTTA\b": "grande",
+            r"\bkotta\b": "grande",
             r"fly lagi": "vuela de nuevo",
             r"Jom": "Vamos a",
             r"jom": "vamos a",
@@ -173,6 +184,7 @@ class TelegramReplicator:
             r"\btreyding\b": "trading",
             r"\bsavdo\b": "operación",
             r"\bsavdolar\b": "operaciones",
+            r"\bfoyda\s+qildilarmi\??\b": "¿obtuvieron ganancias?",
             r"\bfoyda\b": "ganancia",
             r"\bzarar\b": "pérdida",
             r"\bkirish\b": "entrada",
@@ -254,15 +266,21 @@ class TelegramReplicator:
             logger.info("Filtro: Mensaje descartado por contener ZOOM.")
             return None
             
-        # 2. DESCARTE: Reuniones/Clases (FXKINGS o similar) - Inglés y Español
+        # 2. DESCARTE: Reuniones/Clases/Transmisiones/En Vivo (FXKINGS o similar) - Inglés y Español
         reunion_keywords = [
             "CLASE", "PRINCIPIANTES", "NOS VEMOS EN", "INICIAMOS EN", 
             "MINUTES TO GO", "MINUTOS PARA EMPEZAR", "CLASS", "BEGINNERS",
             "SEE YOU IN", "STARTING IN", "JOIN NOW", "ENTRA YA", "WEBINAR",
-            "SESIÓN EN VIVO", "LIVE SESSION"
+            "SESIÓN EN VIVO", "LIVE SESSION", "EN VIVO", "AL AIRE", "CRONOGRAMA",
+            "BOSINMI", "ONLINE", "ÉTER", "ETER"
         ]
         if any(kw in text_upper for kw in reunion_keywords):
-            logger.info(f"Filtro: Mensaje de reunión/clase descartado ({source_name}).")
+            logger.info(f"Filtro: Mensaje de reunión/clase/en vivo/online descartado ({source_name}).")
+            return None
+
+        # 2.1 DESCARTE: Entrevistas con estudiantes en línea
+        if any(term in text_upper for term in ["ENTREVISTA", "ESTUDIANTES EN LÍNEA", "ESTUDIANTES EN LINEA", "ENTREVISTA EN LÍNEA", "ENTREVISTA EN LINEA"]):
+            logger.info(f"Filtro: Mensaje descartado por tema de entrevista / estudiantes en línea.")
             return None
 
         # 3. DESCARTE: VIP (Si el mensaje contiene VIP, no se envía)
@@ -270,10 +288,10 @@ class TelegramReplicator:
             logger.info(f"Filtro: Mensaje descartado por contener VIP.")
             return None
 
-        # 3.1 DESCARTE: Redes Sociales e Instagram (Instagram, TikTok, Facebook, Twitter, YouTube, Discord, etc.)
+        # 3.1 DESCARTE: Redes Sociales (Instagram, TikTok, Facebook, Twitter, YouTube, Discord, WhatsApp, Telegram, etc.)
         social_keywords = [
-            "INSTAGRAM", "INSTA", "TIKTOK", "TIK TOK", "FACEBOOK", "TWITTER", 
-            "YOUTUBE", "DISCORD", "SNAPCHAT", "THREADS", "PINTEREST",
+            "INSTAGRAM", "INSTA", "TIKTOK", "TIK TOK", "FACEBOOK", "TWITTER", "X.COM",
+            "YOUTUBE", "DISCORD", "SNAPCHAT", "THREADS", "PINTEREST", "LINKEDIN", "WHATSAPP",
             "REDES SOCIALES", "RED SOCIAL", "SOCIAL MEDIA", "MEDIA SOSIAL",
             "SIGUENOS", "SÍGUENOS", "SIGANOS", "SÍGANOS", "SIGANME", "SÍGANME",
             "FOLLOW US", "FOLLOW ME", "FOLLOW OUR", "IKUTI KAMI", "SUBSCRIBE",
@@ -281,7 +299,7 @@ class TelegramReplicator:
         ]
         for kw in social_keywords:
             if re.search(rf'\b{re.escape(kw)}\b', text_upper):
-                logger.info(f"Filtro: Mensaje descartado por mención de redes sociales / Instagram ({kw}).")
+                logger.info(f"Filtro: Mensaje descartado por mención de redes sociales ({kw}).")
                 return None
 
         # 4. REEMPLAZOS ESPECÍFICOS
