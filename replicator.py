@@ -41,7 +41,7 @@ class TelegramReplicator:
         self.ai_api_url = os.getenv('AI_API_URL', 'https://apifreellm.com/api/v1/chat')
         self.ai_api_key = os.getenv('AI_API_KEY', '')
         self.gemini_api_key = os.getenv('GEMINI_API_KEY', os.getenv('AI_API_KEY', '')).strip()
-        self.gemini_model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+        self.gemini_model = os.getenv('GEMINI_MODEL', 'gemini-3.6-flash')
 
         # Diccionario de reemplazos manuales específicos
         self.manual_replacements = {

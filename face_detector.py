@@ -99,7 +99,7 @@ async def detect_face_gemini(ruta_imagen: str, gemini_key: str) -> bool:
             }
         }
 
-        models_to_try = ['gemini-1.5-flash', 'gemini-3.6-flash', 'gemini-2.0-flash']
+        models_to_try = ['gemini-3.6-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']
         async with httpx.AsyncClient(timeout=10.0) as client:
             for model in models_to_try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
