@@ -39,6 +39,9 @@ REPLICATION_MAP = {
     ],
     -1003928036121: [
         {"dest": -1004308389038, "name": "Grupo 3928036121", "priority": 1, "allow_media": True, "use_gemini": True}
+    ],
+    -1003992671981: [
+        {"dest": -1004351918395, "name": "NASR", "priority": 1, "allow_media": True, "use_gemini": True}
     ]
 }
 
