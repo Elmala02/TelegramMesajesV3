@@ -251,6 +251,12 @@ class TelegramReplicator:
         if not text: return None
         text = self.normalize_text(text)
         text_upper = text.upper()
+
+        # Detectar si el mensaje es una SEÑAL TÉCNICA DE TRADING explícita
+        # Si es una señal (contiene parámetros de entrada/TP/SL/BUY/SELL/XAUUSD), se protege contra descartes por palabras clave generales.
+        signal_keywords = ["SIGNAL:", "ENTRY:", "TAKE PROFIT", "STOP LOSS", "BUY LIMIT", "SELL LIMIT", "BUY STOP", "SELL STOP"]
+        has_signal_format = ("XAUUSD" in text_upper or "GOLD" in text_upper) and any(sk in text_upper for sk in ["BUY", "SELL", "ENTRY", "TP", "SL", "SIGNAL"])
+        is_explicit_signal = has_signal_format or any(sk in text_upper for sk in signal_keywords)
         
         # 0. DESCARTE: Concurso / Sitio Web / Website
         if "CONCURSO" in text_upper or "CONTEST" in text_upper or "GIVEAWAY" in text_upper or "RAFFLE" in text_upper or "SWEEPSTAKE" in text_upper or "SWEEPSTAKES" in text_upper or "COMPETITION" in text_upper or "SITIO WEB" in text_upper or "WEBSITE" in text_upper or "WEB SITE" in text_upper or "WEB-SITE" in text_upper or "SITE-WEB" in text_upper:
@@ -266,42 +272,44 @@ class TelegramReplicator:
         if "ZOOM" in text_upper or "US02WEB.ZOOM.US" in text_upper:
             logger.info("Filtro: Mensaje descartado por contener ZOOM.")
             return None
-            
-        # 2. DESCARTE: Reuniones/Clases/Transmisiones/En Vivo (FXKINGS o similar) - Inglés y Español
-        reunion_keywords = [
-            "CLASE", "PRINCIPIANTES", "NOS VEMOS EN", "INICIAMOS EN", 
-            "MINUTES TO GO", "MINUTOS PARA EMPEZAR", "CLASS", "BEGINNERS",
-            "SEE YOU IN", "STARTING IN", "JOIN NOW", "ENTRA YA", "WEBINAR",
-            "SESIÓN EN VIVO", "LIVE SESSION", "EN VIVO", "AL AIRE", "CRONOGRAMA",
-            "BOSINMI", "ONLINE", "ÉTER", "ETER"
-        ]
-        if any(kw in text_upper for kw in reunion_keywords):
-            logger.info(f"Filtro: Mensaje de reunión/clase/en vivo/online descartado ({source_name}).")
-            return None
 
-        # 2.1 DESCARTE: Entrevistas con estudiantes en línea
-        if any(term in text_upper for term in ["ENTREVISTA", "ESTUDIANTES EN LÍNEA", "ESTUDIANTES EN LINEA", "ENTREVISTA EN LÍNEA", "ENTREVISTA EN LINEA"]):
-            logger.info(f"Filtro: Mensaje descartado por tema de entrevista / estudiantes en línea.")
-            return None
-
-        # 3. DESCARTE: VIP (Si el mensaje contiene VIP, no se envía)
-        if "VIP" in text_upper:
-            logger.info(f"Filtro: Mensaje descartado por contener VIP.")
-            return None
-
-        # 3.1 DESCARTE: Redes Sociales (Instagram, TikTok, Facebook, Twitter, YouTube, Discord, WhatsApp, Telegram, etc.)
-        social_keywords = [
-            "INSTAGRAM", "INSTA", "TIKTOK", "TIK TOK", "FACEBOOK", "TWITTER", "X.COM",
-            "YOUTUBE", "DISCORD", "SNAPCHAT", "THREADS", "PINTEREST", "LINKEDIN", "WHATSAPP",
-            "REDES SOCIALES", "RED SOCIAL", "SOCIAL MEDIA", "MEDIA SOSIAL",
-            "SIGUENOS", "SÍGUENOS", "SIGANOS", "SÍGANOS", "SIGANME", "SÍGANME",
-            "FOLLOW US", "FOLLOW ME", "FOLLOW OUR", "IKUTI KAMI", "SUBSCRIBE",
-            "SUSCRÍBETE", "SUSCRIBETE"
-        ]
-        for kw in social_keywords:
-            if re.search(rf'\b{re.escape(kw)}\b', text_upper):
-                logger.info(f"Filtro: Mensaje descartado por mención de redes sociales ({kw}).")
+        # Si es una señal de trading explícita, OMITIR los descartes de reuniones/VIP/redes sociales
+        if not is_explicit_signal:
+            # 2. DESCARTE: Reuniones/Clases/Transmisiones/En Vivo (FXKINGS o similar) - Inglés y Español
+            reunion_keywords = [
+                "CLASE", "PRINCIPIANTES", "NOS VEMOS EN", "INICIAMOS EN", 
+                "MINUTES TO GO", "MINUTOS PARA EMPEZAR", "CLASS", "BEGINNERS",
+                "SEE YOU IN", "STARTING IN", "JOIN NOW", "ENTRA YA", "WEBINAR",
+                "SESIÓN EN VIVO", "LIVE SESSION", "EN VIVO", "AL AIRE", "CRONOGRAMA",
+                "BOSINMI", "ONLINE", "ÉTER", "ETER"
+            ]
+            if any(kw in text_upper for kw in reunion_keywords):
+                logger.info(f"Filtro: Mensaje de reunión/clase/en vivo/online descartado ({source_name}).")
                 return None
+
+            # 2.1 DESCARTE: Entrevistas con estudiantes en línea
+            if any(term in text_upper for term in ["ENTREVISTA", "ESTUDIANTES EN LÍNEA", "ESTUDIANTES EN LINEA", "ENTREVISTA EN LÍNEA", "ENTREVISTA EN LINEA"]):
+                logger.info(f"Filtro: Mensaje descartado por tema de entrevista / estudiantes en línea.")
+                return None
+
+            # 3. DESCARTE: VIP (Si el mensaje contiene VIP, no se envía)
+            if "VIP" in text_upper:
+                logger.info(f"Filtro: Mensaje descartado por contener VIP.")
+                return None
+
+            # 3.1 DESCARTE: Redes Sociales (Instagram, TikTok, Facebook, Twitter, YouTube, Discord, WhatsApp, Telegram, etc.)
+            social_keywords = [
+                "INSTAGRAM", "INSTA", "TIKTOK", "TIK TOK", "FACEBOOK", "TWITTER", "X.COM",
+                "YOUTUBE", "DISCORD", "SNAPCHAT", "THREADS", "PINTEREST", "LINKEDIN", "WHATSAPP",
+                "REDES SOCIALES", "RED SOCIAL", "SOCIAL MEDIA", "MEDIA SOSIAL",
+                "SIGUENOS", "SÍGUENOS", "SIGANOS", "SÍGANOS", "SIGANME", "SÍGANME",
+                "FOLLOW US", "FOLLOW ME", "FOLLOW OUR", "IKUTI KAMI", "SUBSCRIBE",
+                "SUSCRÍBETE", "SUSCRIBETE"
+            ]
+            for kw in social_keywords:
+                if re.search(rf'\b{re.escape(kw)}\b', text_upper):
+                    logger.info(f"Filtro: Mensaje descartado por mención de redes sociales ({kw}).")
+                    return None
 
         # 4. REEMPLAZOS ESPECÍFICOS
         final_text = text
@@ -1146,7 +1154,8 @@ class TelegramReplicator:
             "2. PRESERVA TÉRMINOS TÉCNICOS: Conserva EXACTAMENTE y en mayúsculas términos de ejecución como: BUY, SELL, BUY LIMIT, SELL LIMIT, BUY STOP, SELL STOP, ENTRY, SL, STOP LOSS, TP, TP1, TP2, TP3, TP4, TP5, TP6, TP7, TP8, TP9, TP10, TAKE PROFIT, BREAK EVEN, BE, OPEN, HIT, PIPS, PIP, GOLD, XAUUSD.\n"
             "3. PRESERVA PRECIOS, NÚMEROS Y EMOJIS: No modifiques valores numéricos, rangos de entrada ni elimines emojis o saltos de línea.\n"
             "4. ELIMINA SLANG RESIDUAL: Traduce expresiones coloquiales malayas (ej. 'junam' -> 'fuerte caída', 'jom fly' -> 'vamos a subir/volar', 'kutip' -> 'asegurar ganancias', 'padu' -> 'sólido/excelente') al contexto financiero en español.\n"
-            "5. RESPUESTA LIMPIA: Devuelve ÚNICAMENTE el texto traducido. No incluyas introducciones ('Aquí está la traducción:'), ni notas, ni explicaciones adicionales."
+            "5. RESPUESTA LIMPIA: Devuelve ÚNICAMENTE el texto traducido. No incluyas introducciones ('Aquí está la traducción:'), ni notas, ni explicaciones adicionales.\n"
+            "6. PROHIBIDO AGREGAR CONTENIDO O CONSEJOS: Traduce EXACTAMENTE el mensaje original. NO añadas opiniones, recomendaciones financieras, consejos de gestión de riesgo ni frases inventadas que no existan en el mensaje original."
         )
 
         payload = {
