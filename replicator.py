@@ -1077,14 +1077,14 @@ class TelegramReplicator:
         if config.get('use_gemini') is True:
             return True
         dest = config.get('dest')
-        # Soporte directo para grupo de prueba 4438757585 / -1004438757585
-        if dest in [-1004438757585, 4438757585, -4438757585]:
+        # Soporte directo para grupo de prueba y NASR (-1004438757585, -1004351918395)
+        if dest in [-1004438757585, 4438757585, -4438757585, -1004351918395, 4351918395, -4351918395]:
             return True
         return False
 
     def is_gemini_dest_id(self, dest_id: int) -> bool:
         """Verifica si un dest_id tiene habilitado Gemini en REPLICATION_MAP o por ID."""
-        if dest_id in [-1004438757585, 4438757585, -4438757585]:
+        if dest_id in [-1004438757585, 4438757585, -4438757585, -1004351918395, 4351918395, -4351918395]:
             return True
         for configs in self.replication_map.values():
             cfg_list = configs if isinstance(configs, list) else [configs]
