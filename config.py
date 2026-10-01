@@ -52,5 +52,6 @@ PROMO_TRIGGERS = [
     "@", "vip", "t.me/", "http", "www.", "join", "bonus", 
     "discount", "oferta", "premium", "free trial", "subscribe",
     "member", "lifetime", "payment", "binance", "bybit", 
-    "registration", "account", "broker", "invest", "profit share"
+    "registration", "account", "broker", "invest", "profit share",
+    "billetera", "pagos", "participantes", "wallet", "wallets"
 ]

@@ -273,6 +273,11 @@ class TelegramReplicator:
             logger.info("Filtro: Mensaje descartado por contener ZOOM.")
             return None
 
+        # 1.1 DESCARTE: Palabras no permitidas (billetera, pagos, participantes, wallet)
+        if re.search(r'\b(BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS)\b', text_upper):
+            logger.info("Filtro: Mensaje descartado por contener palabras no permitidas (billetera, pagos, participantes, wallet).")
+            return None
+
         # Si es una señal de trading explícita, OMITIR los descartes de reuniones/VIP/redes sociales
         if not is_explicit_signal:
             # 2. DESCARTE: Reuniones/Clases/Transmisiones/En Vivo (FXKINGS o similar) - Inglés y Español
@@ -1119,7 +1124,7 @@ class TelegramReplicator:
         return False
 
     def sanitize_text(self, text: str) -> str:
-        """Sanitiza menciones, enlaces externos y limpia etiquetas HTML/custom emojis corruptas."""
+        """Sanitiza menciones, enlaces externos, etiquetas HTML y fugas de razonamiento IA."""
         if not text:
             return ""
         text = re.sub(r'http[s]?://\S+', '👑CLUB 10M', text)
@@ -1130,7 +1135,30 @@ class TelegramReplicator:
         text = re.sub(r'</?(?:tg-emoji|emoji)(?:\s+[^>]*)?>', '', text)
         # Limpiar viñetas o puntos huérfanos residuales al inicio de línea
         text = re.sub(r'^[·•\s]+(?=[A-Za-z0-9ÁÉÍÓÚáéíóú💎👑✅])', '', text, flags=re.MULTILINE)
-        return text.strip()
+
+        # Limpiar posibles fugas del razonamiento interno o reglas del prompt de la IA (CoT leakage)
+        leak_patterns = [
+            r'rule\s+\d+\s+says',
+            r'let\'s\s+check\s+rule',
+            r'writing\s+stop\s+loss',
+            r'emojis\s+intact',
+            r'elimina\s+slang\s+residual',
+            r'respuesta\s+limpia',
+            r'prohibido\s+agregar\s+contenido',
+            r'only\s+translated\s+text',
+            r'execution\s+terms',
+            r'none\s+added'
+        ]
+        clean_lines = []
+        for line in text.split('\n'):
+            line_low = line.lower()
+            if any(re.search(pat, line_low) for pat in leak_patterns):
+                logger.warning(f"Sanitizer: Fuga de razonamiento de IA eliminada: '{line.strip()}'")
+                continue
+            clean_lines.append(line)
+        text = "\n".join(clean_lines).strip()
+
+        return text
 
     async def translate_with_gemini(self, text: str) -> str:
         """
@@ -1150,24 +1178,29 @@ class TelegramReplicator:
             "Eres un traductor y editor financiero experto en señales y análisis de trading de Forex, Oro (XAUUSD) y Cripto para Telegram.\n"
             "Tu tarea es traducir con la máxima precisión el mensaje al ESPAÑOL manteniendo un formato limpio y profesional.\n\n"
             "REGLAS ESTRICTAS:\n"
-            "1. TRADUCE TODO EL TEXTO DESCRIPTIVO: Si el mensaje contiene párrafos, explicaciones o frases en inglés, malayo, indonesio, ruso, uzbeko o cualquier otro idioma, tradúcelas completamente al español neutro de trading.\n"
+            "1. TRADUCE TODO EL TEXTO DESCRIPTIVO: Si el mensaje contiene párrafos, explicaciones o frases en cualquier idioma, tradúcelas completamente al español neutro de trading.\n"
             "2. PRESERVA TÉRMINOS TÉCNICOS: Conserva EXACTAMENTE y en mayúsculas términos de ejecución como: BUY, SELL, BUY LIMIT, SELL LIMIT, BUY STOP, SELL STOP, ENTRY, SL, STOP LOSS, TP, TP1, TP2, TP3, TP4, TP5, TP6, TP7, TP8, TP9, TP10, TAKE PROFIT, BREAK EVEN, BE, OPEN, HIT, PIPS, PIP, GOLD, XAUUSD.\n"
             "3. PRESERVA PRECIOS, NÚMEROS Y EMOJIS: No modifiques valores numéricos, rangos de entrada ni elimines emojis o saltos de línea.\n"
             "4. ELIMINA SLANG RESIDUAL: Traduce expresiones coloquiales malayas (ej. 'junam' -> 'fuerte caída', 'jom fly' -> 'vamos a subir/volar', 'kutip' -> 'asegurar ganancias', 'padu' -> 'sólido/excelente') al contexto financiero en español.\n"
-            "5. RESPUESTA LIMPIA: Devuelve ÚNICAMENTE el texto traducido. No incluyas introducciones ('Aquí está la traducción:'), ni notas, ni explicaciones adicionales.\n"
-            "6. PROHIBIDO AGREGAR CONTENIDO O CONSEJOS: Traduce EXACTAMENTE el mensaje original. NO añadas opiniones, recomendaciones financieras, consejos de gestión de riesgo ni frases inventadas que no existan en el mensaje original."
+            "5. RESPUESTA ÚNICA Y LIMPIA: Devuelve ÚNICAMENTE la traducción final limpia del mensaje. NUNCA incluyas tu proceso de pensamiento, reglas, reflexiones internas ('Rule 2 says:', 'Respuesta limpia:', etc.), ni explicaciones adicionales.\n"
+            "6. PROHIBIDO AGREGAR CONTENIDO O CONSEJOS: Traduce EXACTAMENTE el mensaje original. NO añadas opiniones, recomendaciones financieras ni notas inventadas."
         )
 
         payload = {
+            "system_instruction": {
+                "parts": [
+                    {"text": system_instruction}
+                ]
+            },
             "contents": [
                 {
                     "parts": [
-                        {"text": f"{system_instruction}\n\nMensaje a traducir:\n{text}"}
+                        {"text": text}
                     ]
                 }
             ],
             "generationConfig": {
-                "temperature": 0.1,
+                "temperature": 0.0,
                 "maxOutputTokens": 2048
             }
         }
