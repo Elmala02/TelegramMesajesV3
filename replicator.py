@@ -499,6 +499,10 @@ class TelegramReplicator:
             for term, placeholder in protected_terms.items():
                 translated = translated.replace(placeholder, term)
 
+            # Corrección para evitar que el traductor convierta TP1/TP2 o TP a PG1/PG2 o PG
+            translated = re.sub(r'\bPG(\d+)\b', r'TP\1', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bPG\b', 'TP', translated, flags=re.IGNORECASE)
+
             # Limpiar etiquetas HTML de custom emojis o tags corruptos producidas por el traductor
             translated = re.sub(r'</?g(?:\s+[^>]*)?>', '', translated)
             translated = re.sub(r'</?(?:tg-emoji|emoji)(?:\s+[^>]*)?>', '', translated)
@@ -615,7 +619,7 @@ class TelegramReplicator:
                 "TP8": "___TP8___",
                 "TP9": "___TP9___",
                 "TP10": "___TP10___",
-                "TAKE PROFIT": "___TP___",
+                "TAKE PROFIT": "___TAKEPROFIT___",
                 "ENTRY": "___E___",
                 "OPEN": "___O___",
                 "BE": "___BE___",
@@ -663,6 +667,10 @@ class TelegramReplicator:
 
             for term, placeholder in protected_terms.items():
                 translated = translated.replace(placeholder, term)
+                
+            # Corrección para evitar que el traductor convierta TP1/TP2 o TP a PG1/PG2 o PG
+            translated = re.sub(r'\bPG(\d+)\b', r'TP\1', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bPG\b', 'TP', translated, flags=re.IGNORECASE)
                 
             translated = re.sub(rf'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
             translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
