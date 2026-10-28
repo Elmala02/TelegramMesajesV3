@@ -255,7 +255,8 @@ class TelegramReplicator:
         # Detectar si el mensaje es una SEÑAL TÉCNICA DE TRADING explícita
         # Si es una señal (contiene parámetros de entrada/TP/SL/BUY/SELL/XAUUSD), se protege contra descartes por palabras clave generales.
         signal_keywords = ["SIGNAL:", "ENTRY:", "TAKE PROFIT", "STOP LOSS", "BUY LIMIT", "SELL LIMIT", "BUY STOP", "SELL STOP"]
-        has_signal_format = ("XAUUSD" in text_upper or "GOLD" in text_upper) and any(sk in text_upper for sk in ["BUY", "SELL", "ENTRY", "TP", "SL", "SIGNAL"])
+        signal_terms = ["BUY", "SELL", "ENTRY", "TP", "SL", "SIGNAL"]
+        has_signal_format = ("XAUUSD" in text_upper or "GOLD" in text_upper) and any(re.search(rf'\b{re.escape(st)}\b', text_upper) for st in signal_terms)
         is_explicit_signal = has_signal_format or any(sk in text_upper for sk in signal_keywords)
         
         # 0. DESCARTE: Concurso / Sitio Web / Website
@@ -276,6 +277,11 @@ class TelegramReplicator:
         # 1.1 DESCARTE: Palabras no permitidas (billetera, pagos, participantes, wallet)
         if re.search(r'\b(BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS)\b', text_upper):
             logger.info("Filtro: Mensaje descartado por contener palabras no permitidas (billetera, pagos, participantes, wallet).")
+            return None
+
+        # 1.2 DESCARTE: VIP OPEN, Cupos, Slots (o tragamonedas)
+        if re.search(r'\bVIP\s+OPEN\b', text_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS)\b', text_upper):
+            logger.info("Filtro: Mensaje descartado por contener VIP OPEN, cupos, slots o tragamonedas.")
             return None
 
         # Si es una señal de trading explícita, OMITIR los descartes de reuniones/VIP/redes sociales
@@ -1339,6 +1345,13 @@ class TelegramReplicator:
                 )
                 continue
 
+            # Descarte de seguridad post-traducción (VIP OPEN, cupos, slots, tragamonedas, etc.)
+            if dest_final_text:
+                dest_upper = dest_final_text.upper()
+                if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS)\b', dest_upper):
+                    logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener términos prohibidos (VIP OPEN / cupos / slots / pagos).")
+                    continue
+
             # Anteponer prefijo al texto si está definido
             text_to_send = f"{prefix}\n\n{dest_final_text}".strip() if prefix and dest_final_text else dest_final_text
 
@@ -1415,6 +1428,13 @@ class TelegramReplicator:
                         f"Razón: Fallaron todos los motores de traducción al procesar la edición."
                     )
                     continue
+
+                # Descarte de seguridad post-traducción en ediciones
+                if final_text:
+                    dest_upper = final_text.upper()
+                    if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS)\b', dest_upper):
+                        logger.info(f"Edit: Msg {msg_id} edición descartada tras traducción por contener términos prohibidos.")
+                        continue
 
                 text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
 

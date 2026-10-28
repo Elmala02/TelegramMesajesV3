@@ -9,7 +9,7 @@ if sys.platform == "win32":
 def test_filters_and_sanitizer():
     replicator = TelegramReplicator(None, {})
     
-    # 1. PRUEBAS DE PALABRAS PROHIBIDAS (billetera, pagos, participantes, wallet)
+    # 1. PRUEBAS DE PALABRAS PROHIBIDAS (billetera, pagos, participantes, wallet, VIP OPEN, cupos, slots)
     filter_test_cases = [
         ("NUEVA SEÑAL XAUUSD BUY ENTRY: 2000 TP: 2010 SL: 1990", True),
         ("Por favor envíen su billetera para el depósito.", False),
@@ -19,6 +19,12 @@ def test_filters_and_sanitizer():
         ("Detalles de pago y cuenta bancaria", False),
         ("Revisar las wallets digitales", False),
         ("Lista de participantes actualizados", False),
+        ("Abrimos nuevos cupos para acceder al canal", False),
+        ("Solo quedan 3 cupos disponibles hoy", False),
+        ("Only 5 slots left for members", False),
+        ("Abriendo tragamonedas gratuitas ahora", False),
+        ("VIP OPEN 💎 mensaje para acceder", False),
+        ("Todos los que piden VIP, estoy abriendo tragamonedas gratuitas, vamos 🚀\nVIP OPEN 💎\nMensaje para acceder👇\n@josejaqueoficial", False),
         ("MENSAJE NORMAL DE TRADING GOLD BUY 2600", True),
     ]
     

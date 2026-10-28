@@ -53,5 +53,7 @@ PROMO_TRIGGERS = [
     "discount", "oferta", "premium", "free trial", "subscribe",
     "member", "lifetime", "payment", "binance", "bybit", 
     "registration", "account", "broker", "invest", "profit share",
-    "billetera", "pagos", "participantes", "wallet", "wallets"
+    "billetera", "pagos", "participantes", "wallet", "wallets",
+    "vip open", "cupo", "cupos", "slot", "slots", "tragamonedas"
 ]
+
