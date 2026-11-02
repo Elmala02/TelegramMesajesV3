@@ -601,8 +601,39 @@ class TelegramReplicator:
             
         return "".join(result_fragments)
 
+    async def _attempt_translation(self, temp_text, detected_lang):
+        """Intenta traducir usando GoogleTranslate (primario) y MyMemory (secundario). Retorna texto traducido o None."""
+        translated = None
+        # 1. Intentar GoogleTranslate (primario)
+        try:
+            translated = await asyncio.to_thread(
+                lambda: GoogleTranslator(source='auto', target='es').translate(temp_text)
+            )
+            if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
+                logger.warning("GoogleTranslate asíncrono devolvió respuesta HTTP 500. Pasando a traductor secundario (MyMemory).")
+                translated = None
+        except Exception as e_gt:
+            logger.warning(f"GoogleTranslate asíncrono fallo inicial: {e_gt}. Pasando a traductor secundario (MyMemory).")
+        
+        # 2. Intentar MyMemoryTranslator (secundario con idioma origen correcto)
+        if not translated or not isinstance(translated, str):
+            try:
+                src_name = self.get_mymemory_lang(detected_lang)
+                translated = await asyncio.to_thread(
+                    lambda: MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
+                )
+                if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated or "INVALID SOURCE" in translated.upper()):
+                    logger.warning("MyMemoryTranslator asíncrono devolvió aviso de límite o error.")
+                    translated = None
+            except Exception as e_mm:
+                logger.error(f"MyMemoryTranslator asíncrono fallo también: {e_mm}")
+                translated = None
+        
+        return translated
+
     async def translate_manually_async(self, text, detected_lang='en'):
-        """Traduce el texto de forma asíncrona usando GoogleTranslate (primario) y MyMemory (secundario)."""
+        """Traduce el texto de forma asíncrona usando GoogleTranslate (primario) y MyMemory (secundario).
+        Incluye reintentos con backoff exponencial para manejar rate limiting."""
         if not text: return text
         
         try:
@@ -640,35 +671,28 @@ class TelegramReplicator:
             for term, placeholder in protected_terms.items():
                 temp_text = re.sub(rf'\b{term}\b', placeholder, temp_text, flags=re.IGNORECASE)
             
+            # Reintentos con backoff exponencial (5s, 10s, 20s)
+            max_retries = 3
+            retry_delays = [5, 10, 20]
             translated = None
-            # 1. Intentar GoogleTranslate (primario)
-            try:
-                translated = await asyncio.to_thread(
-                    lambda: GoogleTranslator(source='auto', target='es').translate(temp_text)
-                )
-                if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
-                    logger.warning("GoogleTranslate asíncrono devolvió respuesta HTTP 500. Pasando a traductor secundario (MyMemory).")
-                    translated = None
-            except Exception as e_gt:
-                logger.warning(f"GoogleTranslate asíncrono fallo inicial: {e_gt}. Pasando a traductor secundario (MyMemory).")
-            
-            # 2. Intentar MyMemoryTranslator (secundario con idioma origen correcto)
-            if not translated or not isinstance(translated, str):
-                try:
-                    src_name = self.get_mymemory_lang(detected_lang)
-                    translated = await asyncio.to_thread(
-                        lambda: MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
-                    )
-                    if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated or "INVALID SOURCE" in translated.upper()):
-                        logger.warning("MyMemoryTranslator asíncrono devolvió aviso de límite o error.")
-                        translated = None
-                except Exception as e_mm:
-                    logger.error(f"MyMemoryTranslator asíncrono fallo también: {e_mm}")
-                    translated = None
 
-            # 3. Si todos los motores fallaron, retornar None para cancelar el envío
+            for attempt in range(max_retries + 1):
+                translated = await self._attempt_translation(temp_text, detected_lang)
+                
+                if translated and isinstance(translated, str):
+                    if attempt > 0:
+                        logger.info(f"Traducción exitosa en intento {attempt + 1} después de reintentos.")
+                    break
+                
+                # Si falló y quedan reintentos, esperar con backoff
+                if attempt < max_retries:
+                    delay = retry_delays[attempt]
+                    logger.warning(f"Traducción fallida (intento {attempt + 1}/{max_retries + 1}). Reintentando en {delay}s...")
+                    await asyncio.sleep(delay)
+
+            # Si todos los reintentos fallaron, retornar None
             if not translated or not isinstance(translated, str):
-                logger.error("Fallo definitivo asíncrono: Todos los traductores (GoogleTranslate y MyMemory) fallaron.")
+                logger.error(f"Fallo definitivo asíncrono tras {max_retries + 1} intentos: Todos los traductores (GoogleTranslate y MyMemory) fallaron.")
                 return None
 
             for term, placeholder in protected_terms.items():
@@ -1185,8 +1209,8 @@ class TelegramReplicator:
 
         gemini_key = (os.getenv('GEMINI_API_KEY') or self.gemini_api_key or "").strip()
         if not gemini_key:
-            logger.warning("Gemini: Clave GEMINI_API_KEY no configurada. Pasando directamente a traductores de respaldo (Google / MyMemory).")
-            return await self.smart_fragment_translation_async(text)
+            logger.warning("Gemini: Clave GEMINI_API_KEY no configurada. Mensaje NO será traducido (grupos Gemini no usan Google Translate).")
+            return None
 
         system_instruction = (
             "Eres un traductor y editor financiero experto en señales y análisis de trading de Forex, Oro (XAUUSD) y Cripto para Telegram.\n"
@@ -1255,8 +1279,8 @@ class TelegramReplicator:
         except Exception as e:
             logger.error(f"Gemini Exception durante traducción: {e}.")
 
-        logger.warning("Gemini: Todos los modelos de IA fallaron o no están disponibles. Pasando a traducción secundaria de respaldo.")
-        return await self.smart_fragment_translation_async(text)
+        logger.warning("Gemini: Todos los modelos de IA fallaron o no están disponibles. Mensaje NO será traducido (grupos Gemini no usan Google Translate).")
+        return None
 
     # --- PIPELINE ---
     async def process_message(self, message: Message, priority: int, configs: list):
