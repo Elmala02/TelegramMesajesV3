@@ -1,4 +1,5 @@
 import os
+import time
 import unicodedata
 import logging
 import re
@@ -42,6 +43,8 @@ class TelegramReplicator:
         self.ai_api_key = os.getenv('AI_API_KEY', '')
         self.gemini_api_key = os.getenv('GEMINI_API_KEY', os.getenv('AI_API_KEY', '')).strip()
         self.gemini_model = os.getenv('GEMINI_MODEL', 'gemini-3.6-flash')
+        self._translation_lock = None
+        self._last_translation_time = 0.0
 
         # Diccionario de reemplazos manuales específicos
         self.manual_replacements = {
@@ -55,6 +58,12 @@ class TelegramReplicator:
             r"44 club": "👑CLUB 10M",
             r"44['’]?s\s*Club": "👑CLUB 10M",
             r"44['’]?s\s*Clup": "👑CLUB 10M",
+            r"#77fx": "👑CLUB 10M",
+            r"Club 77": "👑CLUB 10M",
+            r"77 club": "👑CLUB 10M",
+            r"77['’]?s\s*Club": "👑CLUB 10M",
+            r"77['’]?s\s*Clup": "👑CLUB 10M",
+            r"77['’]s": "",
             r"\bclub\b(?!\s*10M)": "👑CLUB 10M",
             r"Sunny": "jose",
             r"\bkim44\b": "Jose",
@@ -327,6 +336,7 @@ class TelegramReplicator:
         
         # Reemplazar 44fx por club 10 m
         final_text = re.sub(r'44fx\.?', 'club 10 m', final_text, flags=re.IGNORECASE)
+        final_text = re.sub(r'77fx\.?', 'club 10 m', final_text, flags=re.IGNORECASE)
         
         # Primero aplicamos los reemplazos de marcas específicas
         for pattern, replacement in self.manual_replacements.items():
@@ -342,81 +352,47 @@ class TelegramReplicator:
 
         return final_text
 
-    def smart_fragment_translation(self, text: str) -> str:
-        """
-        Divide el texto en fragmentos, detecta el idioma y traduce solo lo necesario.
-        Preserva términos técnicos, URLs y emojis.
-        """
-        if not text: return ""
-
-        # 1. Dividir el texto respetando los delimitadores
-        # Usamos regex para dividir por \n, . (seguido de espacio o fin), !, ? manteniendo los delimitadores
-        fragments = re.split(r'(\n|\. |\!|\?)', text)
-        
-        result_fragments = []
-        
-        for fragment in fragments:
-            if not fragment:
-                result_fragments.append("")
-                continue
-                
-            # Si el fragmento es un delimitador, lo dejamos igual
-            if fragment in ['\n', '!', '?', '. ']:
-                result_fragments.append(fragment)
-                continue
-                
-            clean_fragment = fragment.strip()
-            
-            # 2. Validar si el fragmento debe ser traducido
-            # Un fragmento se considera técnico SOLO si es MUY corto y contiene palabras clave aisladas
-            # Si el fragmento tiene más de 5 palabras, probablemente es descriptivo y debe traducirse
-            words_in_fragment = [w for w in clean_fragment.split() if len(w) > 1]
-            is_long_description = len(words_in_fragment) > 5
-            
-            is_technical_only = any(re.search(rf'^\b{word}\b$', clean_fragment.upper()) for word in ["BUY", "SELL", "TP", "SL", "ENTRY", "XAUUSD", "GOLD"])
-            is_url = re.search(r'http[s]?://\S+|t\.me/\S+', clean_fragment)
-            is_only_numbers = re.match(r'^[\d\.\-\s/]+$', clean_fragment) if clean_fragment else False
-            
-            # Si es una descripción larga, forzamos traducción aunque tenga términos técnicos
-            should_translate = clean_fragment and (is_long_description or (not is_technical_only and not is_url and not is_only_numbers))
-            
-            if should_translate:
-                try:
-                    # 3. Detectar idioma de forma más flexible
-                    # Forzar detección si contiene palabras comunes en inglés
-                    common_english = ["the", "and", "investors", "strength", "driver", "today", "uncertainty"]
-                    is_english_manual = any(re.search(rf'\b{w}\b', clean_fragment.lower()) for w in common_english)
-                    
-                    lang = 'en' if is_english_manual else ('ms' if any(w in clean_fragment.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"]) else detect(clean_fragment))
-                    
-                    if lang != 'es':
-                        # 4. Traducir usando el método existente
-                        translated_fragment = self.translate_manually(fragment)
-                        
-                        if translated_fragment is None:
-                            logger.error(f"Fallo crítico en traducción. Bloqueando el mensaje completo.")
-                            return None
-
-                        # Si después de traducir todavía detectamos fragmentos comunes de malayo,
-                        # aplicamos una traducción forzada palabra por palabra para esos fragmentos.
-                        if any(w in translated_fragment.lower() for w in ["junam", "kutip", "kita", "fly"]):
-                            translated_fragment = self.translate_word_by_word(translated_fragment)
-                            
-                        result_fragments.append(translated_fragment)
-                    else:
-                        result_fragments.append(fragment)
-                except Exception as e:
-                    # Si falla intentamos una vez más y si falla abortamos
-                    logger.warning(f"Error en detección/traducción de fragmento '{clean_fragment}': {e}. Intentando traducción de fallback.")
-                    translated_fragment = self.translate_manually(fragment)
-                    if translated_fragment is None:
-                        logger.error(f"Fallo crítico en traducción de fallback. Bloqueando el mensaje completo.")
-                        return None
-                    result_fragments.append(translated_fragment)
+    async def _translate_google_direct(self, text: str) -> str:
+        """Traduce texto completo usando el endpoint directo de Google Translate API (rápido, sin scraping)."""
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "es",
+            "dt": "t"
+        }
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, params=params, data={"q": text})
+            if response.status_code == 200:
+                data = response.json()
+                if data and isinstance(data, list) and data[0]:
+                    translated = "".join(part[0] for part in data[0] if part and part[0])
+                    return translated
+            elif response.status_code == 429:
+                logger.warning("Google Translate API directo devolvió status 429 (Too Many Requests).")
             else:
-                result_fragments.append(fragment)
-            
-        return "".join(result_fragments)
+                logger.warning(f"Google Translate API directo devolvió status {response.status_code}.")
+        return None
+
+    def _translate_google_direct_sync(self, text: str) -> str:
+        """Versión síncrona de _translate_google_direct."""
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "es",
+            "dt": "t"
+        }
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(url, params=params, data={"q": text})
+                if response.status_code == 200:
+                    data = response.json()
+                    if data and isinstance(data, list) and data[0]:
+                        return "".join(part[0] for part in data[0] if part and part[0])
+        except Exception as e:
+            logger.warning(f"Error en Google Translate directo síncrono: {e}")
+        return None
 
     def get_mymemory_lang(self, lang_code: str) -> str:
         """Convierte código de idioma corto a nombre compatible con MyMemoryTranslator."""
@@ -435,60 +411,52 @@ class TelegramReplicator:
         }
         return mapping.get(str(lang_code).lower() if lang_code else 'en', 'english')
 
-    def translate_manually(self, text, detected_lang='en'):
-        """Traduce el texto usando Google Translate (y MyMemory como secundario) preservando términos técnicos."""
-        if not text: return text
-        
-        try:
-            protected_terms = {
-                "XAUUSD/GOLD": "PROTECTEDTOKENXAUUSDGOLD",
-                "XAU/USD": "PROTECTEDTOKENXAUUSD",
-                "BUY GOLD": "PROTECTEDTOKENBUYGOLD",
-                "SELL GOLD": "PROTECTEDTOKENSELLGOLD",
-                "BUY": "PROTECTEDTOKENBUY",
-                "SELL": "PROTECTEDTOKENSELL",
-                "STOP LOSS": "PROTECTEDTOKENSTOPLOSS",
-                "SL": "PROTECTEDTOKENSL",
-                "TP1": "PROTECTEDTOKENTPONE",
-                "TP2": "PROTECTEDTOKENTPTWO",
-                "TP3": "PROTECTEDTOKENTPTHREE",
-                "TP4": "PROTECTEDTOKENTPFOUR",
-                "TP5": "PROTECTEDTOKENTPFIVE",
-                "TP6": "PROTECTEDTOKENTPSIX",
-                "TP7": "PROTECTEDTOKENTPSEVEN",
-                "TP8": "PROTECTEDTOKENTPEIGHT",
-                "TP9": "PROTECTEDTOKENTPNINE",
-                "TP10": "PROTECTEDTOKENTPTEN",
-                "TAKE PROFIT": "PROTECTEDTOKENTAKEPROFIT",
-                "ENTRY": "PROTECTEDTOKENENTRY",
-                "OPEN": "PROTECTEDTOKENOPEN",
-                "BE": "PROTECTEDTOKENBREAKEVEN",
-                "BREAK EVEN": "PROTECTEDTOKENBREAKEVEN",
-                "XAUUSD": "PROTECTEDTOKENXAU",
-                "GOLD": "PROTECTEDTOKENGOLD",
-                "HIT": "PROTECTEDTOKENHIT",
-                "TP": "PROTECTEDTOKENTP",
-            }
+    async def _attempt_translation(self, temp_text, detected_lang):
+        """Intenta traducir usando:
+        1. Google Translate API directo (ultra rápido y sin bloqueos de scraping).
+        2. GoogleTranslator de deep_translator (secundario).
+        3. MyMemoryTranslator (terciario).
+        """
+        if self._translation_lock is None:
+            self._translation_lock = asyncio.Lock()
             
-            temp_text = text
-            for term, placeholder in protected_terms.items():
-                temp_text = re.sub(rf'\b{term}\b', placeholder, temp_text, flags=re.IGNORECASE)
-            
+        async with self._translation_lock:
+            # Control de ráfagas: mínimo 0.5s entre llamadas
+            elapsed = time.time() - self._last_translation_time
+            if elapsed < 0.5:
+                await asyncio.sleep(0.5 - elapsed)
+                
             translated = None
-            # 1. Intentar GoogleTranslate (primario)
-            try:
-                translated = GoogleTranslator(source='auto', target='es').translate(temp_text)
-                if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
-                    logger.warning("GoogleTranslate devolvió respuesta HTTP 500. Pasando a traductor secundario (MyMemory).")
-                    translated = None
-            except Exception as e_gt:
-                logger.warning(f"GoogleTranslate fallo inicial: {e_gt}. Pasando a traductor secundario (MyMemory).")
             
-            # 2. Intentar MyMemoryTranslator (secundario)
+            # 1. Intentar Google Translate API directo (primario)
+            try:
+                translated = await self._translate_google_direct(temp_text)
+                if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
+                    translated = None
+            except Exception as e_gtx:
+                logger.warning(f"GoogleTranslate API directo fallo inicial: {e_gtx}. Pasando a traductor secundario.")
+                translated = None
+
+            # 2. Intentar deep_translator GoogleTranslator (secundario)
+            if not translated or not isinstance(translated, str):
+                try:
+                    translated = await asyncio.to_thread(
+                        lambda: GoogleTranslator(source='auto', target='es').translate(temp_text)
+                    )
+                    if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
+                        logger.warning("GoogleTranslator devolvió error 500. Pasando a MyMemory.")
+                        translated = None
+                except Exception as e_gt:
+                    logger.warning(f"GoogleTranslator fallo secundario: {e_gt}. Pasando a MyMemory.")
+                    translated = None
+            
+            # 3. Intentar MyMemoryTranslator (terciario)
             if not translated or not isinstance(translated, str):
                 try:
                     src_name = self.get_mymemory_lang(detected_lang)
-                    translated = MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
+                    translated = await asyncio.to_thread(
+                        lambda: MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
+                    )
                     if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated or "INVALID SOURCE" in translated.upper()):
                         logger.warning("MyMemoryTranslator devolvió aviso de límite o error.")
                         translated = None
@@ -496,144 +464,12 @@ class TelegramReplicator:
                     logger.error(f"MyMemoryTranslator fallo también: {e_mm}")
                     translated = None
 
-            # 3. Si todos los motores fallaron, retornar None para cancelar el envío
-            if not translated or not isinstance(translated, str):
-                logger.error("Fallo definitivo: Todos los traductores (GoogleTranslate y MyMemory) fallaron.")
-                return None
-
-            # Restaurar términos protegidos
-            for term, placeholder in protected_terms.items():
-                translated = translated.replace(placeholder, term)
-
-            # Corrección para evitar que el traductor convierta TP1/TP2 o TP a PG1/PG2 o PG
-            translated = re.sub(r'\bPG(\d+)\b', r'TP\1', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'\bPG\b', 'TP', translated, flags=re.IGNORECASE)
-
-            # Limpiar etiquetas HTML de custom emojis o tags corruptos producidas por el traductor
-            translated = re.sub(r'</?g(?:\s+[^>]*)?>', '', translated)
-            translated = re.sub(r'</?(?:tg-emoji|emoji)(?:\s+[^>]*)?>', '', translated)
-                
-            translated = re.sub(rf'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
-            
-            translated = re.sub(r'\bkim\b', 'Jose', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'\bsunny\b', 'jose', translated, flags=re.IGNORECASE)
-
-            malay_residuals = {
-                r'\blagi\b': 'de nuevo',
-                r'\bjom\b': 'vamos',
-                r'\bfly\b': 'vuela',
-                r'\bnaik\b': 'sube',
-                r'\bturun\b': 'baja',
-                r'\bjunam\b': 'bajar/caer',
-                r'\bkutip\b': 'recaudar',
-                r'\bpadu\b': 'fuerte',
-                r'\bmantap\b': 'excelente'
-            }
-            for pattern, replacement in malay_residuals.items():
-                translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
-                
-            return self.apply_spanish_terms(translated.strip())
-            
-        except Exception as e:
-            logger.error(f"Excepción en traducción manual: {e}")
-            return None
-
-    async def smart_fragment_translation_async(self, text: str) -> str:
-        """
-        Versión asíncrona de smart_fragment_translation que no bloquea el event loop.
-        Retorna None si la traducción de fragmentos requeridos falla.
-        """
-        if not text: return ""
-        text = self.normalize_text(text)
-        fragments = re.split(r'(\n|\. |\!|\?)', text)
-        result_fragments = []
-        
-        for fragment in fragments:
-            if not fragment:
-                result_fragments.append("")
-                continue
-                
-            if fragment in ['\n', '!', '?', '. ']:
-                result_fragments.append(fragment)
-                continue
-                
-            clean_fragment = fragment.strip()
-            
-            words_in_fragment = [w for w in clean_fragment.split() if len(w) > 1]
-            is_long_description = len(words_in_fragment) > 5
-            
-            is_technical_only = any(re.search(rf'^\b{word}\b$', clean_fragment.upper()) for word in ["BUY", "SELL", "TP", "SL", "ENTRY", "XAUUSD", "GOLD"])
-            is_url = re.search(r'http[s]?://\S+|t\.me/\S+', clean_fragment)
-            is_only_numbers = re.match(r'^[\d\.\-\s/]+$', clean_fragment) if clean_fragment else False
-            
-            should_translate = clean_fragment and (is_long_description or (not is_technical_only and not is_url and not is_only_numbers))
-            
-            if should_translate:
-                try:
-                    common_english = ["the", "and", "investors", "strength", "driver", "today", "uncertainty"]
-                    is_english_manual = any(re.search(rf'\b{w}\b', clean_fragment.lower()) for w in common_english)
-                    
-                    lang = 'en' if is_english_manual else ('ms' if any(w in clean_fragment.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"]) else detect(clean_fragment))
-                    
-                    if lang != 'es':
-                        translated_fragment = await self.translate_manually_async(fragment, detected_lang=lang)
-                        
-                        if translated_fragment is None:
-                            logger.error(f"Fallo crítico en traducción asíncrona de fragmento '{clean_fragment}'. Cancelando mensaje.")
-                            return None
-
-                        if any(w in translated_fragment.lower() for w in ["junam", "kutip", "kita", "fly"]):
-                            translated_fragment = self.translate_word_by_word(translated_fragment)
-                            
-                        result_fragments.append(translated_fragment)
-                    else:
-                        result_fragments.append(fragment)
-                except Exception as e:
-                    logger.warning(f"Error en detección/traducción de fragmento '{clean_fragment}': {e}. Intentando traducción de fallback asíncrona.")
-                    translated_fragment = await self.translate_manually_async(fragment)
-                    if translated_fragment is None:
-                        logger.error(f"Fallo crítico en traducción de fallback asíncrona de '{clean_fragment}'. Cancelando mensaje.")
-                        return None
-                    result_fragments.append(translated_fragment)
-            else:
-                result_fragments.append(fragment)
-            
-        return "".join(result_fragments)
-
-    async def _attempt_translation(self, temp_text, detected_lang):
-        """Intenta traducir usando GoogleTranslate (primario) y MyMemory (secundario). Retorna texto traducido o None."""
-        translated = None
-        # 1. Intentar GoogleTranslate (primario)
-        try:
-            translated = await asyncio.to_thread(
-                lambda: GoogleTranslator(source='auto', target='es').translate(temp_text)
-            )
-            if translated and isinstance(translated, str) and ("Error 500" in translated or "Server Error" in translated):
-                logger.warning("GoogleTranslate asíncrono devolvió respuesta HTTP 500. Pasando a traductor secundario (MyMemory).")
-                translated = None
-        except Exception as e_gt:
-            logger.warning(f"GoogleTranslate asíncrono fallo inicial: {e_gt}. Pasando a traductor secundario (MyMemory).")
-        
-        # 2. Intentar MyMemoryTranslator (secundario con idioma origen correcto)
-        if not translated or not isinstance(translated, str):
-            try:
-                src_name = self.get_mymemory_lang(detected_lang)
-                translated = await asyncio.to_thread(
-                    lambda: MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
-                )
-                if translated and isinstance(translated, str) and ("MYMEMORY WARNING" in translated.upper() or "QUOTA EXCEEDED" in translated.upper() or "Error 500" in translated or "INVALID SOURCE" in translated.upper()):
-                    logger.warning("MyMemoryTranslator asíncrono devolvió aviso de límite o error.")
-                    translated = None
-            except Exception as e_mm:
-                logger.error(f"MyMemoryTranslator asíncrono fallo también: {e_mm}")
-                translated = None
-        
-        return translated
+            self._last_translation_time = time.time()
+            return translated
 
     async def translate_manually_async(self, text, detected_lang='en'):
-        """Traduce el texto de forma asíncrona usando GoogleTranslate (primario) y MyMemory (secundario).
-        Incluye reintentos con backoff exponencial para manejar rate limiting."""
+        """Traduce el texto completo de forma asíncrona en UNA SOLA llamada preservando términos técnicos.
+        Incluye reintentos con backoff si la red falla."""
         if not text: return text
         
         try:
@@ -642,6 +478,10 @@ class TelegramReplicator:
                 "XAU/USD": "___XAU_USD___",
                 "BUY GOLD": "___BG___",
                 "SELL GOLD": "___SG___",
+                "BUY LIMIT": "___BLIMIT___",
+                "SELL LIMIT": "___SLIMIT___",
+                "BUY STOP": "___BSTOP___",
+                "SELL STOP": "___SSTOP___",
                 "BUY": "___B___",
                 "SELL": "___S___",
                 "STOP LOSS": "___SL___",
@@ -669,11 +509,11 @@ class TelegramReplicator:
             
             temp_text = text
             for term, placeholder in protected_terms.items():
-                temp_text = re.sub(rf'\b{term}\b', placeholder, temp_text, flags=re.IGNORECASE)
+                temp_text = re.sub(rf'{re.escape(term)}', placeholder, temp_text, flags=re.IGNORECASE)
             
-            # Reintentos con backoff exponencial (5s, 10s, 20s)
+            # Reintentos con backoff exponencial (3s, 6s, 12s)
             max_retries = 3
-            retry_delays = [5, 10, 20]
+            retry_delays = [3, 6, 12]
             translated = None
 
             for attempt in range(max_retries + 1):
@@ -684,40 +524,39 @@ class TelegramReplicator:
                         logger.info(f"Traducción exitosa en intento {attempt + 1} después de reintentos.")
                     break
                 
-                # Si falló y quedan reintentos, esperar con backoff
                 if attempt < max_retries:
                     delay = retry_delays[attempt]
                     logger.warning(f"Traducción fallida (intento {attempt + 1}/{max_retries + 1}). Reintentando en {delay}s...")
                     await asyncio.sleep(delay)
 
-            # Si todos los reintentos fallaron, retornar None
+            # Si todos los reintentos fallaron, retornar None para no enviar mensajes sin traducir
             if not translated or not isinstance(translated, str):
-                logger.error(f"Fallo definitivo asíncrono tras {max_retries + 1} intentos: Todos los traductores (GoogleTranslate y MyMemory) fallaron.")
+                logger.error(f"Fallo definitivo asíncrono tras {max_retries + 1} intentos: Todos los traductores fallaron.")
                 return None
 
             for term, placeholder in protected_terms.items():
                 translated = translated.replace(placeholder, term)
                 
             # Corrección para evitar que el traductor convierta TP1/TP2 o TP a PG1/PG2 o PG
-            translated = re.sub(r'\bPG(\d+)\b', r'TP\1', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'\bPG\b', 'TP', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'PG(\d+)', r'TP', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'PG', 'TP', translated, flags=re.IGNORECASE)
                 
-            translated = re.sub(rf'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
+            translated = re.sub(rf'hit', 'HIT', translated, flags=re.IGNORECASE)
             translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
             
-            translated = re.sub(r'\bkim\b', 'Jose', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'\bsunny\b', 'jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'kim', 'Jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'sunny', 'jose', translated, flags=re.IGNORECASE)
 
             malay_residuals = {
-                r'\blagi\b': 'de nuevo',
-                r'\bjom\b': 'vamos',
-                r'\bfly\b': 'vuela',
-                r'\bnaik\b': 'sube',
-                r'\bturun\b': 'baja',
-                r'\bjunam\b': 'bajar/caer',
-                r'\bkutip\b': 'recaudar',
-                r'\bpadu\b': 'fuerte',
-                r'\bmantap\b': 'excelente'
+                r'lagi': 'de nuevo',
+                r'jom': 'vamos',
+                r'fly': 'vuela',
+                r'naik': 'sube',
+                r'turun': 'baja',
+                r'junam': 'bajar/caer',
+                r'kutip': 'recaudar',
+                r'padu': 'fuerte',
+                r'mantap': 'excelente'
             }
             for pattern, replacement in malay_residuals.items():
                 translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
@@ -727,6 +566,132 @@ class TelegramReplicator:
         except Exception as e:
             logger.error(f"Excepción en traducción asíncrona: {e}")
             return None
+
+    async def smart_fragment_translation_async(self, text: str) -> str:
+        """
+        Traduce el mensaje completo de forma asíncrona en UNA SOLA llamada,
+        protegiendo términos técnicos, marcas, números y emojis.
+        Retorna None si la traducción falla por completo (para evitar enviar textos en inglés).
+        """
+        if not text: return ""
+        text = self.normalize_text(text)
+        
+        # Validar si contiene palabras comunes en inglés o malayo
+        common_english = ["the", "and", "investors", "strength", "driver", "today", "uncertainty", "running", "spike", "secured", "news", "ready", "now", "manage", "risk", "wait"]
+        is_english_manual = any(re.search(rf'{w}', text.lower()) for w in common_english)
+        is_malay = any(w in text.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"])
+        
+        try:
+            lang = 'en' if is_english_manual else ('ms' if is_malay else detect(text))
+        except Exception:
+            lang = 'en'
+            
+        # Si ya está en español y no contiene palabras residuales en inglés o malayo, no requiere traducción
+        if lang == 'es' and not is_english_manual and not is_malay:
+            return text
+            
+        # Traducir todo el mensaje en UNA SOLA llamada a Google
+        translated = await self.translate_manually_async(text, detected_lang=lang)
+        if translated is None:
+            logger.error("Fallo crítico en traducción asíncrona del mensaje. Cancelando mensaje.")
+            return None
+            
+        if any(w in translated.lower() for w in ["junam", "kutip", "kita", "fly"]):
+            translated = self.translate_word_by_word(translated)
+            
+        return translated
+
+    def translate_manually(self, text, detected_lang='en'):
+        """Versión síncrona de translate_manually para compatibilidad."""
+        if not text: return text
+        try:
+            protected_terms = {
+                "XAUUSD/GOLD": "___XAUUSD_GOLD___",
+                "XAU/USD": "___XAU_USD___",
+                "BUY GOLD": "___BG___",
+                "SELL GOLD": "___SG___",
+                "BUY LIMIT": "___BLIMIT___",
+                "SELL LIMIT": "___SLIMIT___",
+                "BUY STOP": "___BSTOP___",
+                "SELL STOP": "___SSTOP___",
+                "BUY": "___B___",
+                "SELL": "___S___",
+                "STOP LOSS": "___SL___",
+                "SL": "___SL___",
+                "TP1": "___TP1___",
+                "TP2": "___TP2___",
+                "TP3": "___TP3___",
+                "TP4": "___TP4___",
+                "TP5": "___TP5___",
+                "TP6": "___TP6___",
+                "TP7": "___TP7___",
+                "TP8": "___TP8___",
+                "TP9": "___TP9___",
+                "TP10": "___TP10___",
+                "TAKE PROFIT": "___TAKEPROFIT___",
+                "ENTRY": "___E___",
+                "OPEN": "___O___",
+                "BE": "___BE___",
+                "BREAK EVEN": "___BE___",
+                "XAUUSD": "___XAU___",
+                "GOLD": "___G___",
+                "HIT": "___HIT___",
+                "TP": "___TP___",
+            }
+            temp_text = text
+            for term, placeholder in protected_terms.items():
+                temp_text = re.sub(rf'{re.escape(term)}', placeholder, temp_text, flags=re.IGNORECASE)
+            
+            translated = self._translate_google_direct_sync(temp_text)
+            if not translated:
+                try:
+                    translated = GoogleTranslator(source='auto', target='es').translate(temp_text)
+                except Exception:
+                    translated = None
+            if not translated:
+                try:
+                    src_name = self.get_mymemory_lang(detected_lang)
+                    translated = MyMemoryTranslator(source=src_name, target='spanish').translate(temp_text)
+                except Exception:
+                    translated = None
+                    
+            if not translated or not isinstance(translated, str):
+                return None
+
+            for term, placeholder in protected_terms.items():
+                translated = translated.replace(placeholder, term)
+
+            translated = re.sub(r'PG(\d+)', r'TP', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'PG', 'TP', translated, flags=re.IGNORECASE)
+            translated = re.sub(rf'hit', 'HIT', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'kim', 'Jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'sunny', 'jose', translated, flags=re.IGNORECASE)
+
+            malay_residuals = {
+                r'lagi': 'de nuevo',
+                r'jom': 'vamos',
+                r'fly': 'vuela',
+                r'naik': 'sube',
+                r'turun': 'baja',
+                r'junam': 'bajar/caer',
+                r'kutip': 'recaudar',
+                r'padu': 'fuerte',
+                r'mantap': 'excelente'
+            }
+            for pattern, replacement in malay_residuals.items():
+                translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
+                
+            return self.apply_spanish_terms(translated.strip())
+        except Exception as e:
+            logger.error(f"Excepción en traducción manual: {e}")
+            return None
+
+    def smart_fragment_translation(self, text: str) -> str:
+        """Versión síncrona de smart_fragment_translation para compatibilidad."""
+        if not text: return ""
+        text = self.normalize_text(text)
+        return self.translate_manually(text)
 
     def translate_word_by_word(self, text):
         """Traduce palabras individuales si la traducción de la frase no fue suficiente."""
