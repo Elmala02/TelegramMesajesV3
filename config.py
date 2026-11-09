@@ -41,7 +41,8 @@ REPLICATION_MAP = {
         {"dest": -1004308389038, "name": "Grupo 3928036121", "priority": 1, "allow_media": True, "use_gemini": True}
     ],
     -1003992671981: [
-        {"dest": -1004351918395, "name": "NASR", "priority": 1, "allow_media": True, "use_gemini": True}
+        {"dest": -1003797962974, "topic": 9585, "name": "Mr Golden", "priority": 1, "allow_media": True},
+        # {"dest": -1004351918395, "name": "NASR", "priority": 1, "allow_media": True} # Destino anterior pausado
     ]
 }
 
@@ -54,6 +55,7 @@ PROMO_TRIGGERS = [
     "member", "lifetime", "payment", "binance", "bybit", 
     "registration", "account", "broker", "invest", "profit share",
     "billetera", "pagos", "participantes", "wallet", "wallets",
-    "vip open", "cupo", "cupos", "slot", "slots", "tragamonedas"
+    "vip open", "cupo", "cupos", "slot", "slots", "tragamonedas",
+    "pool", "pools", "poll", "polls"
 ]
 

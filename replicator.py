@@ -283,9 +283,9 @@ class TelegramReplicator:
             logger.info("Filtro: Mensaje descartado por contener ZOOM.")
             return None
 
-        # 1.1 DESCARTE: Palabras no permitidas (billetera, pagos, participantes, wallet)
-        if re.search(r'\b(BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS)\b', text_upper):
-            logger.info("Filtro: Mensaje descartado por contener palabras no permitidas (billetera, pagos, participantes, wallet).")
+        # 1.1 DESCARTE: Palabras no permitidas (billetera, pagos, participantes, wallet, pool, poll)
+        if re.search(r'\b(BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS)\b', text_upper):
+            logger.info("Filtro: Mensaje descartado por contener palabras no permitidas (billetera, pagos, participantes, wallet, pool, poll).")
             return None
 
         # 1.2 DESCARTE: VIP OPEN, Cupos, Slots (o tragamonedas)
@@ -1337,8 +1337,8 @@ class TelegramReplicator:
             # Descarte de seguridad post-traducción (VIP OPEN, cupos, slots, tragamonedas, etc.)
             if dest_final_text:
                 dest_upper = dest_final_text.upper()
-                if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS)\b', dest_upper):
-                    logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener términos prohibidos (VIP OPEN / cupos / slots / pagos).")
+                if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS)\b', dest_upper):
+                    logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener términos prohibidos (VIP OPEN / cupos / slots / pagos / pool).")
                     continue
 
             # Anteponer prefijo al texto si está definido
@@ -1421,7 +1421,7 @@ class TelegramReplicator:
                 # Descarte de seguridad post-traducción en ediciones
                 if final_text:
                     dest_upper = final_text.upper()
-                    if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS)\b', dest_upper):
+                    if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS)\b', dest_upper):
                         logger.info(f"Edit: Msg {msg_id} edición descartada tras traducción por contener términos prohibidos.")
                         continue
 
