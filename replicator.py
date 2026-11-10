@@ -499,8 +499,12 @@ class TelegramReplicator:
                 "TAKE PROFIT": "___TAKEPROFIT___",
                 "ENTRY": "___E___",
                 "OPEN": "___O___",
-                "BE": "___BE___",
+                "SL TO BE": "___SLTOBE___",
+                "SET TO BE": "___SETTOBE___",
                 "BREAK EVEN": "___BE___",
+                "BREAKEVEN": "___BE___",
+                "BREAK-EVEN": "___BE___",
+                "BE": "___BE___",
                 "XAUUSD": "___XAU___",
                 "GOLD": "___G___",
                 "HIT": "___HIT___",
@@ -509,7 +513,7 @@ class TelegramReplicator:
             
             temp_text = text
             for term, placeholder in protected_terms.items():
-                temp_text = re.sub(rf'{re.escape(term)}', placeholder, temp_text, flags=re.IGNORECASE)
+                temp_text = re.sub(r'\b' + re.escape(term) + r'\b', placeholder, temp_text, flags=re.IGNORECASE)
             
             # Reintentos con backoff exponencial (3s, 6s, 12s)
             max_retries = 3
@@ -534,29 +538,69 @@ class TelegramReplicator:
                 logger.error(f"Fallo definitivo asíncrono tras {max_retries + 1} intentos: Todos los traductores fallaron.")
                 return None
 
-            for term, placeholder in protected_terms.items():
-                translated = translated.replace(placeholder, term)
+            # Restauraciones ordenadas para términos de trading y BE
+            restore_map = [
+                ("___SLTOBE___", "SL a BE"),
+                ("___SETTOBE___", "poner en BE"),
+                ("___BE___", "BE"),
+                ("___XAUUSD_GOLD___", "XAUUSD/GOLD"),
+                ("___XAU_USD___", "XAU/USD"),
+                ("___BG___", "BUY GOLD"),
+                ("___SG___", "SELL GOLD"),
+                ("___BLIMIT___", "BUY LIMIT"),
+                ("___SLIMIT___", "SELL LIMIT"),
+                ("___BSTOP___", "BUY STOP"),
+                ("___SSTOP___", "SELL STOP"),
+                ("___B___", "BUY"),
+                ("___S___", "SELL"),
+                ("___SL___", "SL"),
+                ("___TP1___", "TP1"),
+                ("___TP2___", "TP2"),
+                ("___TP3___", "TP3"),
+                ("___TP4___", "TP4"),
+                ("___TP5___", "TP5"),
+                ("___TP6___", "TP6"),
+                ("___TP7___", "TP7"),
+                ("___TP8___", "TP8"),
+                ("___TP9___", "TP9"),
+                ("___TP10___", "TP10"),
+                ("___TAKEPROFIT___", "TAKE PROFIT"),
+                ("___E___", "ENTRY"),
+                ("___O___", "OPEN"),
+                ("___XAU___", "XAUUSD"),
+                ("___G___", "GOLD"),
+                ("___HIT___", "HIT"),
+                ("___TP___", "TP"),
+            ]
+            for placeholder, replacement in restore_map:
+                translated = translated.replace(placeholder, replacement)
                 
             # Corrección para evitar que el traductor convierta TP1/TP2 o TP a PG1/PG2 o PG
-            translated = re.sub(r'PG(\d+)', r'TP', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'PG', 'TP', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bPG(\d+)\b', r'TP\1', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bPG\b', 'TP', translated, flags=re.IGNORECASE)
+
+            # Corrección anti-SER/ESTAR: si el traductor tradujo "BE" (Break Even) como verbo "ser" o "estar"
+            translated = re.sub(r'\b(a|en|hacia)\s+ser\b', r'\1 BE', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\b(a|en|hacia)\s+estar\b', r'\1 BE', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\b(poner|set|mover|ajustar|cambiar|posicion(?:es)?|posici(?:o|ó)n(?:es)?|sl|stop\s*loss)\s+ser\b', r'\1 BE', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\b(poner|set|mover|ajustar|cambiar|posicion(?:es)?|posici(?:o|ó)n(?:es)?|sl|stop\s*loss)\s+estar\b', r'\1 BE', translated, flags=re.IGNORECASE)
                 
-            translated = re.sub(rf'hit', 'HIT', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
             translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
             
-            translated = re.sub(r'kim', 'Jose', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'sunny', 'jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bkim\b', 'Jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bsunny\b', 'jose', translated, flags=re.IGNORECASE)
 
             malay_residuals = {
-                r'lagi': 'de nuevo',
-                r'jom': 'vamos',
-                r'fly': 'vuela',
-                r'naik': 'sube',
-                r'turun': 'baja',
-                r'junam': 'bajar/caer',
-                r'kutip': 'recaudar',
-                r'padu': 'fuerte',
-                r'mantap': 'excelente'
+                r'\blagi\b': 'de nuevo',
+                r'\bjom\b': 'vamos',
+                r'\bfly\b': 'vuela',
+                r'\bnaik\b': 'sube',
+                r'\bturun\b': 'baja',
+                r'\bjunam\b': 'bajar/caer',
+                r'\bkutip\b': 'recaudar',
+                r'\bpadu\b': 'fuerte',
+                r'\bmantap\b': 'excelente'
             }
             for pattern, replacement in malay_residuals.items():
                 translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
@@ -577,8 +621,8 @@ class TelegramReplicator:
         text = self.normalize_text(text)
         
         # Validar si contiene palabras comunes en inglés o malayo
-        common_english = ["the", "and", "investors", "strength", "driver", "today", "uncertainty", "running", "spike", "secured", "news", "ready", "now", "manage", "risk", "wait"]
-        is_english_manual = any(re.search(rf'{w}', text.lower()) for w in common_english)
+        common_english = ["the", "and", "investors", "strength", "driver", "today", "uncertainty", "running", "spike", "secured", "news", "ready", "now", "manage", "risk", "wait", "break", "even"]
+        is_english_manual = any(re.search(r'\b' + re.escape(w) + r'\b', text.lower()) for w in common_english)
         is_malay = any(w in text.lower() for w in ["junam", "kutip", "kita", "lagi", "jom", "fly", "padu"])
         
         try:
@@ -631,8 +675,12 @@ class TelegramReplicator:
                 "TAKE PROFIT": "___TAKEPROFIT___",
                 "ENTRY": "___E___",
                 "OPEN": "___O___",
-                "BE": "___BE___",
+                "SL TO BE": "___SLTOBE___",
+                "SET TO BE": "___SETTOBE___",
                 "BREAK EVEN": "___BE___",
+                "BREAKEVEN": "___BE___",
+                "BREAK-EVEN": "___BE___",
+                "BE": "___BE___",
                 "XAUUSD": "___XAU___",
                 "GOLD": "___G___",
                 "HIT": "___HIT___",
@@ -640,7 +688,7 @@ class TelegramReplicator:
             }
             temp_text = text
             for term, placeholder in protected_terms.items():
-                temp_text = re.sub(rf'{re.escape(term)}', placeholder, temp_text, flags=re.IGNORECASE)
+                temp_text = re.sub(r'\b' + re.escape(term) + r'\b', placeholder, temp_text, flags=re.IGNORECASE)
             
             translated = self._translate_google_direct_sync(temp_text)
             if not translated:
@@ -658,26 +706,66 @@ class TelegramReplicator:
             if not translated or not isinstance(translated, str):
                 return None
 
-            for term, placeholder in protected_terms.items():
-                translated = translated.replace(placeholder, term)
+            restore_map = [
+                ("___SLTOBE___", "SL a BE"),
+                ("___SETTOBE___", "poner en BE"),
+                ("___BE___", "BE"),
+                ("___XAUUSD_GOLD___", "XAUUSD/GOLD"),
+                ("___XAU_USD___", "XAU/USD"),
+                ("___BG___", "BUY GOLD"),
+                ("___SG___", "SELL GOLD"),
+                ("___BLIMIT___", "BUY LIMIT"),
+                ("___SLIMIT___", "SELL LIMIT"),
+                ("___BSTOP___", "BUY STOP"),
+                ("___SSTOP___", "SELL STOP"),
+                ("___B___", "BUY"),
+                ("___S___", "SELL"),
+                ("___SL___", "SL"),
+                ("___TP1___", "TP1"),
+                ("___TP2___", "TP2"),
+                ("___TP3___", "TP3"),
+                ("___TP4___", "TP4"),
+                ("___TP5___", "TP5"),
+                ("___TP6___", "TP6"),
+                ("___TP7___", "TP7"),
+                ("___TP8___", "TP8"),
+                ("___TP9___", "TP9"),
+                ("___TP10___", "TP10"),
+                ("___TAKEPROFIT___", "TAKE PROFIT"),
+                ("___E___", "ENTRY"),
+                ("___O___", "OPEN"),
+                ("___XAU___", "XAUUSD"),
+                ("___G___", "GOLD"),
+                ("___HIT___", "HIT"),
+                ("___TP___", "TP"),
+            ]
+            for placeholder, replacement in restore_map:
+                translated = translated.replace(placeholder, replacement)
 
-            translated = re.sub(r'PG(\d+)', r'TP', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'PG', 'TP', translated, flags=re.IGNORECASE)
-            translated = re.sub(rf'hit', 'HIT', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bPG(\d+)\b', r'TP\1', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bPG\b', 'TP', translated, flags=re.IGNORECASE)
+
+            # Corrección anti-SER/ESTAR
+            translated = re.sub(r'\b(a|en|hacia)\s+ser\b', r'\1 BE', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\b(a|en|hacia)\s+estar\b', r'\1 BE', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\b(poner|set|mover|ajustar|cambiar|posicion(?:es)?|posici(?:o|ó)n(?:es)?|sl|stop\s*loss)\s+ser\b', r'\1 BE', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\b(poner|set|mover|ajustar|cambiar|posicion(?:es)?|posici(?:o|ó)n(?:es)?|sl|stop\s*loss)\s+estar\b', r'\1 BE', translated, flags=re.IGNORECASE)
+
+            translated = re.sub(r'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
             translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'kim', 'Jose', translated, flags=re.IGNORECASE)
-            translated = re.sub(r'sunny', 'jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bkim\b', 'Jose', translated, flags=re.IGNORECASE)
+            translated = re.sub(r'\bsunny\b', 'jose', translated, flags=re.IGNORECASE)
 
             malay_residuals = {
-                r'lagi': 'de nuevo',
-                r'jom': 'vamos',
-                r'fly': 'vuela',
-                r'naik': 'sube',
-                r'turun': 'baja',
-                r'junam': 'bajar/caer',
-                r'kutip': 'recaudar',
-                r'padu': 'fuerte',
-                r'mantap': 'excelente'
+                r'\blagi\b': 'de nuevo',
+                r'\bjom\b': 'vamos',
+                r'\bfly\b': 'vuela',
+                r'\bnaik\b': 'sube',
+                r'\bturun\b': 'baja',
+                r'\bjunam\b': 'bajar/caer',
+                r'\bkutip\b': 'recaudar',
+                r'\bpadu\b': 'fuerte',
+                r'\bmantap\b': 'excelente'
             }
             for pattern, replacement in malay_residuals.items():
                 translated = re.sub(pattern, replacement, translated, flags=re.IGNORECASE)
@@ -692,6 +780,7 @@ class TelegramReplicator:
         if not text: return ""
         text = self.normalize_text(text)
         return self.translate_manually(text)
+
 
     def translate_word_by_word(self, text):
         """Traduce palabras individuales si la traducción de la frase no fue suficiente."""
