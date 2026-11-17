@@ -97,7 +97,7 @@ async def main():
                         break
                     if attempt_load == 0 and not dialogs_loaded:
                         try:
-                            await client.get_dialogs(limit=150)
+                            await client.get_dialogs(limit=None)
                             dialogs_loaded = True
                         except Exception:
                             break

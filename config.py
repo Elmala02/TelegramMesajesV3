@@ -46,7 +46,7 @@ REPLICATION_MAP = {
     ],
     "@NeuralTradeML_Bot": [
         {
-            "dest": -4454156723,
+            "dest": -1004454156723,
             "name": "NeuralTradeML",
             "priority": 1,
             "allow_media": False,

@@ -766,6 +766,67 @@ class TelegramReplicator:
             return []
         return configs if isinstance(configs, list) else [configs]
 
+    async def _trigger_refresh_once(self, source_key, refresh_cfgs, reason="Auto-Refresh"):
+        """Hace clic en el botón REFRESH del último mensaje del bot y garantiza envío (Opción A)."""
+        source_name = refresh_cfgs[0].get('name', str(source_key))
+        btn_keyword = str(refresh_cfgs[0].get('refresh_button_text', 'REFRESH')).upper()
+
+        valid_configs = [c for c in refresh_cfgs if self.is_in_schedule(c.get('schedule'))]
+        if not valid_configs:
+            logger.info(f"{reason} ({source_name}): Fuera de horario configurado, omitiendo ciclo.")
+            return
+
+        target_msg = None
+        target_coords = None
+        async for msg in self.client.iter_messages(source_key, limit=15):
+            if msg.out or not msg.buttons:
+                continue
+            for r_idx, row in enumerate(msg.buttons):
+                for c_idx, btn in enumerate(row):
+                    btn_text = (getattr(btn, 'text', '') or '').upper()
+                    if btn_keyword in btn_text:
+                        target_msg = msg
+                        target_coords = (r_idx, c_idx)
+                        break
+                if target_msg:
+                    break
+            if target_msg:
+                break
+
+        if not target_msg:
+            logger.warning(
+                f"{reason} ({source_name}): No se encontró mensaje reciente con botón '{btn_keyword}'."
+            )
+            return
+
+        ts_before = time.time()
+        logger.info(
+            f"{reason} ({source_name}): Haciendo clic en botón '{btn_keyword}' del Msg {target_msg.id}..."
+        )
+        try:
+            await target_msg.click(target_coords[0], target_coords[1])
+        except Exception as e_click:
+            logger.warning(f"{reason} ({source_name}): Aviso al hacer clic en '{btn_keyword}': {e_click}")
+
+        # Esperar a que el bot edite o envíe un nuevo mensaje (6s)
+        await asyncio.sleep(6)
+
+        last_ev_ts = self._last_bot_event_ts.get(str(target_msg.chat_id), 0.0)
+        if last_ev_ts >= ts_before:
+            logger.info(f"{reason} ({source_name}): Señal actualizada recibida y enviada por evento.")
+        else:
+            # Opción A: si Telegram no disparó MessageEdited porque el texto no cambió,
+            # re-leemos el mensaje y lo enviamos igual como mensaje nuevo
+            logger.info(
+                f"{reason} ({source_name}): Sin evento de edición tras clic (texto sin cambios). "
+                f"Enviando señal vigente como mensaje nuevo..."
+            )
+            fresh_msg = await self.client.get_messages(source_key, ids=target_msg.id)
+            msg_to_send = fresh_msg if fresh_msg else target_msg
+            if msg_to_send and not self._is_loading_placeholder(msg_to_send.text or ""):
+                priority = valid_configs[0].get('priority', 99)
+                await self.process_message(msg_to_send, priority, valid_configs)
+
     async def _auto_refresh_loop(self, source_key, refresh_cfgs, interval_minutes: float):
         """Presiona automáticamente el botón REFRESH en bots interactivos cada N minutos."""
         interval_seconds = max(60, int(interval_minutes * 60))
@@ -779,62 +840,7 @@ class TelegramReplicator:
         while True:
             try:
                 await asyncio.sleep(interval_seconds)
-
-                valid_configs = [c for c in refresh_cfgs if self.is_in_schedule(c.get('schedule'))]
-                if not valid_configs:
-                    logger.info(f"Auto-Refresh ({source_name}): Fuera de horario configurado, omitiendo ciclo.")
-                    continue
-
-                target_msg = None
-                target_coords = None
-                async for msg in self.client.iter_messages(source_key, limit=15):
-                    if msg.out or not msg.buttons:
-                        continue
-                    for r_idx, row in enumerate(msg.buttons):
-                        for c_idx, btn in enumerate(row):
-                            btn_text = (getattr(btn, 'text', '') or '').upper()
-                            if btn_keyword in btn_text:
-                                target_msg = msg
-                                target_coords = (r_idx, c_idx)
-                                break
-                        if target_msg:
-                            break
-                    if target_msg:
-                        break
-
-                if not target_msg:
-                    logger.warning(
-                        f"Auto-Refresh ({source_name}): No se encontró mensaje reciente con botón '{btn_keyword}'."
-                    )
-                    continue
-
-                ts_before = time.time()
-                logger.info(
-                    f"Auto-Refresh ({source_name}): Haciendo clic en botón '{btn_keyword}' del Msg {target_msg.id}..."
-                )
-                try:
-                    await target_msg.click(target_coords[0], target_coords[1])
-                except Exception as e_click:
-                    logger.warning(f"Auto-Refresh ({source_name}): Aviso al hacer clic en '{btn_keyword}': {e_click}")
-
-                # Esperar a que el bot edite o envíe un nuevo mensaje (6s)
-                await asyncio.sleep(6)
-
-                last_ev_ts = self._last_bot_event_ts.get(str(target_msg.chat_id), 0.0)
-                if last_ev_ts >= ts_before:
-                    logger.info(f"Auto-Refresh ({source_name}): Señal actualizada recibida y enviada por evento.")
-                else:
-                    # Opción A: si Telegram no disparó MessageEdited porque el texto no cambió,
-                    # re-leemos el mensaje y lo enviamos igual como mensaje nuevo
-                    logger.info(
-                        f"Auto-Refresh ({source_name}): Sin evento de edición tras clic (texto sin cambios). "
-                        f"Enviando señal vigente como mensaje nuevo..."
-                    )
-                    fresh_msg = await self.client.get_messages(source_key, ids=target_msg.id)
-                    msg_to_send = fresh_msg if fresh_msg else target_msg
-                    if msg_to_send and not self._is_loading_placeholder(msg_to_send.text or ""):
-                        priority = valid_configs[0].get('priority', 99)
-                        await self.process_message(msg_to_send, priority, valid_configs)
+                await self._trigger_refresh_once(source_key, refresh_cfgs, reason="Auto-Refresh")
             except asyncio.CancelledError:
                 logger.info(f"Auto-Refresh ({source_name}): Tarea cancelada.")
                 break
@@ -843,15 +849,47 @@ class TelegramReplicator:
 
     async def start(self):
         """Starts listeners for all source channels."""
-        source_ids = list(self.replication_map.keys())
-        logger.info(f"Listening on sources: {source_ids}")
-        
-        # Listen to ALL source channels
-        @self.client.on(events.NewMessage(chats=source_ids))
+        # Identificar IDs enteros resueltos y posibles usernames pendientes (evita que un @username roto bloquee Telethon)
+        resolved_int_sources = {k for k in self.replication_map.keys() if isinstance(k, int)}
+        unresolved_str_sources = {
+            k for k, v in self.replication_map.items()
+            if isinstance(k, str) and not any(isinstance(ik, int) and iv is v for ik, iv in self.replication_map.items())
+        }
+        logger.info(f"Listening on resolved int sources: {sorted(resolved_int_sources)}")
+        if unresolved_str_sources:
+            logger.warning(f"Unresolved string sources (fallback por username): {sorted(unresolved_str_sources)}")
+
+        # Recolectar fuentes con auto-refresh (deduplicadas por objeto de configuración)
+        refresh_targets = []
+        started_refresh_keys = set()
+        for src_key, cfgs in self.replication_map.items():
+            if isinstance(src_key, str) and any(
+                isinstance(k, int) and v is cfgs for k, v in self.replication_map.items()
+            ):
+                continue
+            cfg_list = cfgs if isinstance(cfgs, list) else [cfgs]
+            refresh_cfgs = [c for c in cfg_list if c.get('auto_refresh_minutes')]
+            if refresh_cfgs and src_key not in started_refresh_keys:
+                started_refresh_keys.add(src_key)
+                interval_min = min(float(c['auto_refresh_minutes']) for c in refresh_cfgs)
+                refresh_targets.append((src_key, refresh_cfgs, interval_min))
+
+        # Listen to ALL new messages (filtrando en Python para máxima confiabilidad con bots y canales)
+        @self.client.on(events.NewMessage())
         async def handler(event):
+            # Comando manual instantáneo: escribir /refresh o !refresh desde tu cuenta fuerza el refresh + envío
+            raw_txt = (event.message.text or "").strip().lower()
+            if getattr(event.message, 'out', False) and raw_txt in ("/refresh", "!refresh") and refresh_targets:
+                logger.info(f"Manual-Refresh: Comando '{raw_txt}' detectado. Ejecutando refresh inmediato...")
+                for src_key, refresh_cfgs, _ in refresh_targets:
+                    asyncio.create_task(self._trigger_refresh_once(src_key, refresh_cfgs, reason="Manual-Refresh"))
+                return
+
+            if event.chat_id not in resolved_int_sources and not unresolved_str_sources:
+                return
+
             configs = await self._get_configs_for_event(event)
             if not configs:
-                logger.warning(f"Message from unknown source ID {event.chat_id}.")
                 return
             
             # Filtrar configs por horario y por incoming_only (ignorar mensajes salientes como /start en bots)
@@ -863,16 +901,23 @@ class TelegramReplicator:
             
             if valid_configs:
                 if any(c.get('edit_as_new') for c in valid_configs) and self._is_loading_placeholder(event.message.text or ""):
+                    logger.info(f"NewMessage: Ignorando mensaje temporal de carga en {event.chat_id}.")
                     return
                 self._last_bot_event_ts[str(event.chat_id)] = time.time()
                 priority = valid_configs[0].get('priority', 99)
                 await self.process_message(event.message, priority, valid_configs)
 
 
-        # Handler para MENSAJES EDITADOS
-        @self.client.on(events.MessageEdited(chats=source_ids))
+        # Handler para MENSAJES EDITADOS (sin chats= para evitar fallos de resolución de Telethon)
+        @self.client.on(events.MessageEdited())
         async def edit_handler(event):
+            if event.chat_id not in resolved_int_sources and not unresolved_str_sources:
+                return
+
             configs = await self._get_configs_for_event(event)
+            if not configs:
+                return
+
             edit_as_new_configs = [
                 c for c in configs
                 if c.get('edit_as_new')
@@ -882,7 +927,7 @@ class TelegramReplicator:
             if edit_as_new_configs:
                 msg_text = (event.message.text or "").strip()
                 if self._is_loading_placeholder(msg_text):
-                    logger.debug(f"EditAsNew: Ignorando mensaje temporal de carga en {event.chat_id}.")
+                    logger.info(f"EditAsNew: Ignorando mensaje temporal de carga en {event.chat_id}.")
                     return
 
                 # Debounce corto (2s) contra eventos duplicados inmediatos con texto idéntico
@@ -903,18 +948,8 @@ class TelegramReplicator:
             await self.handle_message_edit(event.message)
 
         # Lanzar tareas de Auto-Refresh para bots interactivos configurados
-        started_refresh_keys = set()
-        for src_key, cfgs in self.replication_map.items():
-            if isinstance(src_key, str) and any(
-                isinstance(k, int) and v is cfgs for k, v in self.replication_map.items()
-            ):
-                continue
-            cfg_list = cfgs if isinstance(cfgs, list) else [cfgs]
-            refresh_cfgs = [c for c in cfg_list if c.get('auto_refresh_minutes')]
-            if refresh_cfgs and src_key not in started_refresh_keys:
-                started_refresh_keys.add(src_key)
-                interval_min = min(float(c['auto_refresh_minutes']) for c in refresh_cfgs)
-                asyncio.create_task(self._auto_refresh_loop(src_key, refresh_cfgs, interval_min))
+        for src_key, refresh_cfgs, interval_min in refresh_targets:
+            asyncio.create_task(self._auto_refresh_loop(src_key, refresh_cfgs, interval_min))
 
         logger.info("CLUB 10M Multi-Source Replicator Running...")
         await self.client.run_until_disconnected()
