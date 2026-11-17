@@ -67,7 +67,9 @@ class TelegramReplicator:
             r"77['’]?s\s*Clup": "👑CLUB 10M",
             r"77['’]s": "",
             r"\bclub\b(?!\s*10M)": "👑CLUB 10M",
-            r"Sunny": "jose",
+            r"s+u+n{2,}[yi]+(?![a-z])": "jose",
+            r"(?<![A-Za-z0-9])s+u+n+y+(?![A-Za-z0-9])": "jose",
+            r"(?<![A-Za-z0-9])s+\s*u+\s*n{2,}\s*[yi]+(?![A-Za-z0-9])": "jose",
             r"\bkim44\b": "Jose",
             r"\bkim\b": "Jose",
             r"\bKim\b": "Jose",
@@ -549,7 +551,8 @@ class TelegramReplicator:
         translated = re.sub(r'\bhit\b', 'HIT', translated, flags=re.IGNORECASE)
         translated = re.sub(r'_*golpe_*', 'HIT', translated, flags=re.IGNORECASE)
         translated = re.sub(r'\bkim\b', 'Jose', translated, flags=re.IGNORECASE)
-        translated = re.sub(r'\bsunny\b', 'jose', translated, flags=re.IGNORECASE)
+        translated = re.sub(r's+u+n{2,}[yi]+(?![a-z])', 'jose', translated, flags=re.IGNORECASE)
+        translated = re.sub(r'(?<![A-Za-z0-9])s+u+n+y+(?![A-Za-z0-9])', 'jose', translated, flags=re.IGNORECASE)
 
         malay_residuals = {
             r'\blagi\b': 'de nuevo',
