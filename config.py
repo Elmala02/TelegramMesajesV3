@@ -43,6 +43,19 @@ REPLICATION_MAP = {
     -1003992671981: [
         {"dest": -1003797962974, "topic": 9585, "name": "Mr Golden", "priority": 1, "allow_media": True},
         # {"dest": -1004351918395, "name": "NASR", "priority": 1, "allow_media": True} # Destino anterior pausado
+    ],
+    "@NeuralTradeML_Bot": [
+        {
+            "dest": -4454156723,
+            "name": "NeuralTradeML",
+            "priority": 1,
+            "allow_media": False,
+            "edit_as_new": True,
+            "auto_refresh_minutes": 30,
+            "refresh_button_text": "REFRESH",
+            "skip_promo_filters": True,
+            "incoming_only": True
+        }
     ]
 }
 

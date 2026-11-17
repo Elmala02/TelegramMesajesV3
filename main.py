@@ -56,13 +56,14 @@ async def main():
         from telethon.utils import get_peer_id
         
         resolved_replication_map = {}
+        dialogs_loaded = False
         for source_key, configs in REPLICATION_MAP.items():
             cfg_list = configs if isinstance(configs, list) else [configs]
             resolved_source_id = source_key
             try:
                 source_entity = await client.get_entity(source_key)
                 resolved_source_id = get_peer_id(source_entity)
-                title = getattr(source_entity, 'title', str(source_key))
+                title = getattr(source_entity, 'title', None) or getattr(source_entity, 'username', str(source_key))
                 logger.info(f"  ✓ Origen resuelto: {source_key} -> {resolved_source_id} ('{title}')")
             except Exception as e:
                 logger.warning(f"  ✗ No se pudo resolver entidad origen {source_key}: {e}")
@@ -71,14 +72,37 @@ async def main():
             for cfg in cfg_list:
                 cfg_copy = dict(cfg)
                 dest_val = cfg_copy.get('dest')
-                try:
-                    dest_entity = await client.get_entity(dest_val)
-                    resolved_dest_id = get_peer_id(dest_entity)
-                    cfg_copy['dest'] = resolved_dest_id
-                    title = getattr(dest_entity, 'title', str(dest_val))
-                    logger.info(f"  ✓ Destino resuelto: {dest_val} -> {resolved_dest_id} ('{title}')")
-                except Exception as e:
-                    logger.warning(f"  ✗ No se pudo resolver entidad destino {dest_val}: {e}")
+                resolved_ok = False
+                candidates = [dest_val]
+                if isinstance(dest_val, int) and dest_val < 0:
+                    s_abs = str(abs(dest_val))
+                    if s_abs.startswith("100") and len(s_abs) > 10:
+                        candidates.append(-int(s_abs[3:]))
+                    else:
+                        candidates.append(int(f"-100{s_abs}"))
+
+                for attempt_load in range(2):
+                    for cand in candidates:
+                        try:
+                            dest_entity = await client.get_entity(cand)
+                            resolved_dest_id = get_peer_id(dest_entity)
+                            cfg_copy['dest'] = resolved_dest_id
+                            title = getattr(dest_entity, 'title', None) or getattr(dest_entity, 'username', str(cand))
+                            logger.info(f"  ✓ Destino resuelto: {dest_val} -> {resolved_dest_id} ('{title}')")
+                            resolved_ok = True
+                            break
+                        except Exception:
+                            continue
+                    if resolved_ok:
+                        break
+                    if attempt_load == 0 and not dialogs_loaded:
+                        try:
+                            await client.get_dialogs(limit=150)
+                            dialogs_loaded = True
+                        except Exception:
+                            break
+                if not resolved_ok:
+                    logger.warning(f"  ✗ No se pudo resolver entidad destino {dest_val} (probados: {candidates})")
                 resolved_cfgs.append(cfg_copy)
 
             resolved_replication_map[resolved_source_id] = resolved_cfgs

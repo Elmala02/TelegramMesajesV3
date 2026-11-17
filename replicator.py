@@ -45,6 +45,8 @@ class TelegramReplicator:
         self.gemini_model = os.getenv('GEMINI_MODEL', 'gemini-3.6-flash')
         self._translation_lock = None
         self._last_translation_time = 0.0
+        self._last_bot_event_ts = {}
+        self._last_edit_as_new_dedupe = {}
 
         # Diccionario de reemplazos manuales específicos
         self.manual_replacements = {
@@ -470,6 +472,23 @@ class TelegramReplicator:
     _PROTECTED_TERMS = [
         (r'(?<![A-Za-z0-9])XAUUSD/GOLD(?![A-Za-z0-9])', 'XTRD01X', 'XAUUSD/GOLD', True),
         (r'(?<![A-Za-z0-9])XAU/USD(?![A-Za-z0-9])', 'XTRD02X', 'XAU/USD', True),
+        (r'(?<![A-Za-z0-9])GBP/USD(?![A-Za-z0-9])', 'XTRD34X', 'GBP/USD', True),
+        (r'(?<![A-Za-z0-9])GBPUSD(?![A-Za-z0-9])', 'XTRD35X', 'GBPUSD', True),
+        (r'(?<![A-Za-z0-9])EUR/USD(?![A-Za-z0-9])', 'XTRD36X', 'EUR/USD', True),
+        (r'(?<![A-Za-z0-9])EURUSD(?![A-Za-z0-9])', 'XTRD37X', 'EURUSD', True),
+        (r'(?<![A-Za-z0-9])AUD/CAD(?![A-Za-z0-9])', 'XTRD38X', 'AUD/CAD', True),
+        (r'(?<![A-Za-z0-9])AUDCAD(?![A-Za-z0-9])', 'XTRD39X', 'AUDCAD', True),
+        (r'(?<![A-Za-z0-9])USD/JPY(?![A-Za-z0-9])', 'XTRD40X', 'USD/JPY', True),
+        (r'(?<![A-Za-z0-9])USDJPY(?![A-Za-z0-9])', 'XTRD41X', 'USDJPY', True),
+        (r'(?<![A-Za-z0-9])TRADE\s+SL(?![A-Za-z0-9])', 'XTRD42X', 'TRADE SL', True),
+        (r'(?<![A-Za-z0-9])HARD\s+SL(?![A-Za-z0-9])', 'XTRD43X', 'HARD SL', True),
+        (r'(?<![A-Za-z0-9])HIGH\s+RR(?![A-Za-z0-9])', 'XTRD44X', 'HIGH RR', True),
+        (r'(?<![A-Za-z0-9])SCALP(?![A-Za-z0-9])', 'XTRD45X', 'SCALP', True),
+        (r'(?<![A-Za-z0-9])M5(?![A-Za-z0-9])', 'XTRD46X', 'M5', False),
+        (r'(?<![A-Za-z0-9])M15(?![A-Za-z0-9])', 'XTRD47X', 'M15', False),
+        (r'(?<![A-Za-z0-9])M30(?![A-Za-z0-9])', 'XTRD48X', 'M30', False),
+        (r'(?<![A-Za-z0-9])H1(?![A-Za-z0-9])', 'XTRD49X', 'H1', False),
+        (r'(?<![A-Za-z0-9])H4(?![A-Za-z0-9])', 'XTRD50X', 'H4', False),
         (r'(?<![A-Za-z0-9])BUY\s+GOLD(?![A-Za-z0-9])', 'XTRD03X', 'BUY GOLD', True),
         (r'(?<![A-Za-z0-9])SELL\s+GOLD(?![A-Za-z0-9])', 'XTRD04X', 'SELL GOLD', True),
         (r'(?<![A-Za-z0-9])BUY\s+LIMIT(?![A-Za-z0-9])', 'XTRD05X', 'BUY LIMIT', True),
@@ -721,6 +740,107 @@ class TelegramReplicator:
         except:
             return text
 
+    def _is_loading_placeholder(self, text: str) -> bool:
+        """Detecta mensajes temporales de carga al hacer clic en REFRESH (ej. '⏳ Refreshing...')."""
+        if not text:
+            return True
+        clean = text.strip().lower()
+        if len(clean) > 60:
+            return False
+        loading_markers = ["refreshing", "loading", "cargando", "actualizando", "please wait", "espere", "⏳"]
+        has_signal_data = any(k in clean for k in ["buy", "sell", "entry", "tp1", "sl", "id:"])
+        return any(m in clean for m in loading_markers) and not has_signal_data
+
+    async def _get_configs_for_event(self, event):
+        chat_id = event.chat_id
+        configs = self.replication_map.get(chat_id)
+        if not configs:
+            try:
+                chat = await event.get_chat()
+                username = getattr(chat, 'username', None)
+                if username:
+                    configs = self.replication_map.get(f"@{username}") or self.replication_map.get(username)
+            except Exception as e_chat:
+                logger.debug(f"Error obteniendo chat para fallback de username: {e_chat}")
+        if not configs:
+            return []
+        return configs if isinstance(configs, list) else [configs]
+
+    async def _auto_refresh_loop(self, source_key, refresh_cfgs, interval_minutes: float):
+        """Presiona automáticamente el botón REFRESH en bots interactivos cada N minutos."""
+        interval_seconds = max(60, int(interval_minutes * 60))
+        source_name = refresh_cfgs[0].get('name', str(source_key))
+        btn_keyword = str(refresh_cfgs[0].get('refresh_button_text', 'REFRESH')).upper()
+        logger.info(
+            f"Auto-Refresh: Iniciado para {source_name} ({source_key}) cada {interval_minutes} min "
+            f"(botón '{btn_keyword}')."
+        )
+
+        while True:
+            try:
+                await asyncio.sleep(interval_seconds)
+
+                valid_configs = [c for c in refresh_cfgs if self.is_in_schedule(c.get('schedule'))]
+                if not valid_configs:
+                    logger.info(f"Auto-Refresh ({source_name}): Fuera de horario configurado, omitiendo ciclo.")
+                    continue
+
+                target_msg = None
+                target_coords = None
+                async for msg in self.client.iter_messages(source_key, limit=15):
+                    if msg.out or not msg.buttons:
+                        continue
+                    for r_idx, row in enumerate(msg.buttons):
+                        for c_idx, btn in enumerate(row):
+                            btn_text = (getattr(btn, 'text', '') or '').upper()
+                            if btn_keyword in btn_text:
+                                target_msg = msg
+                                target_coords = (r_idx, c_idx)
+                                break
+                        if target_msg:
+                            break
+                    if target_msg:
+                        break
+
+                if not target_msg:
+                    logger.warning(
+                        f"Auto-Refresh ({source_name}): No se encontró mensaje reciente con botón '{btn_keyword}'."
+                    )
+                    continue
+
+                ts_before = time.time()
+                logger.info(
+                    f"Auto-Refresh ({source_name}): Haciendo clic en botón '{btn_keyword}' del Msg {target_msg.id}..."
+                )
+                try:
+                    await target_msg.click(target_coords[0], target_coords[1])
+                except Exception as e_click:
+                    logger.warning(f"Auto-Refresh ({source_name}): Aviso al hacer clic en '{btn_keyword}': {e_click}")
+
+                # Esperar a que el bot edite o envíe un nuevo mensaje (6s)
+                await asyncio.sleep(6)
+
+                last_ev_ts = self._last_bot_event_ts.get(str(target_msg.chat_id), 0.0)
+                if last_ev_ts >= ts_before:
+                    logger.info(f"Auto-Refresh ({source_name}): Señal actualizada recibida y enviada por evento.")
+                else:
+                    # Opción A: si Telegram no disparó MessageEdited porque el texto no cambió,
+                    # re-leemos el mensaje y lo enviamos igual como mensaje nuevo
+                    logger.info(
+                        f"Auto-Refresh ({source_name}): Sin evento de edición tras clic (texto sin cambios). "
+                        f"Enviando señal vigente como mensaje nuevo..."
+                    )
+                    fresh_msg = await self.client.get_messages(source_key, ids=target_msg.id)
+                    msg_to_send = fresh_msg if fresh_msg else target_msg
+                    if msg_to_send and not self._is_loading_placeholder(msg_to_send.text or ""):
+                        priority = valid_configs[0].get('priority', 99)
+                        await self.process_message(msg_to_send, priority, valid_configs)
+            except asyncio.CancelledError:
+                logger.info(f"Auto-Refresh ({source_name}): Tarea cancelada.")
+                break
+            except Exception as e:
+                logger.error(f"Auto-Refresh ({source_name}): Error en ciclo automático: {e}")
+
     async def start(self):
         """Starts listeners for all source channels."""
         source_ids = list(self.replication_map.keys())
@@ -729,30 +849,22 @@ class TelegramReplicator:
         # Listen to ALL source channels
         @self.client.on(events.NewMessage(chats=source_ids))
         async def handler(event):
-            chat_id = event.chat_id
-            configs = self.replication_map.get(chat_id)
-            
+            configs = await self._get_configs_for_event(event)
             if not configs:
-                try:
-                    chat = await event.get_chat()
-                    username = getattr(chat, 'username', None)
-                    if username:
-                        configs = self.replication_map.get(f"@{username}") or self.replication_map.get(username)
-                except Exception as e_chat:
-                    logger.debug(f"Error obteniendo chat para fallback de username: {e_chat}")
-            
-            if not configs:
-                logger.warning(f"Message from unknown source ID {chat_id}.")
+                logger.warning(f"Message from unknown source ID {event.chat_id}.")
                 return
-
-            # Asegurar que configs sea una lista
-            if not isinstance(configs, list):
-                configs = [configs]
             
-            # Filtrar configs por horario
-            valid_configs = [c for c in configs if self.is_in_schedule(c.get('schedule'))]
+            # Filtrar configs por horario y por incoming_only (ignorar mensajes salientes como /start en bots)
+            valid_configs = [
+                c for c in configs
+                if self.is_in_schedule(c.get('schedule'))
+                and not (c.get('incoming_only') and getattr(event.message, 'out', False))
+            ]
             
             if valid_configs:
+                if any(c.get('edit_as_new') for c in valid_configs) and self._is_loading_placeholder(event.message.text or ""):
+                    return
+                self._last_bot_event_ts[str(event.chat_id)] = time.time()
                 priority = valid_configs[0].get('priority', 99)
                 await self.process_message(event.message, priority, valid_configs)
 
@@ -760,8 +872,49 @@ class TelegramReplicator:
         # Handler para MENSAJES EDITADOS
         @self.client.on(events.MessageEdited(chats=source_ids))
         async def edit_handler(event):
-            # Procesar el mensaje editado a través del sistema de cache
+            configs = await self._get_configs_for_event(event)
+            edit_as_new_configs = [
+                c for c in configs
+                if c.get('edit_as_new')
+                and self.is_in_schedule(c.get('schedule'))
+                and not (c.get('incoming_only') and getattr(event.message, 'out', False))
+            ]
+            if edit_as_new_configs:
+                msg_text = (event.message.text or "").strip()
+                if self._is_loading_placeholder(msg_text):
+                    logger.debug(f"EditAsNew: Ignorando mensaje temporal de carga en {event.chat_id}.")
+                    return
+
+                # Debounce corto (2s) contra eventos duplicados inmediatos con texto idéntico
+                dedupe_key = (event.chat_id, event.message.id)
+                now_ts = time.time()
+                last_text, last_ts = self._last_edit_as_new_dedupe.get(dedupe_key, ("", 0.0))
+                if msg_text == last_text and (now_ts - last_ts) < 2.0:
+                    return
+                self._last_edit_as_new_dedupe[dedupe_key] = (msg_text, now_ts)
+                self._last_bot_event_ts[str(event.chat_id)] = now_ts
+
+                logger.info(f"EditAsNew: Edición detectada en {event.chat_id} (Msg {event.message.id}). Enviando como NUEVO mensaje...")
+                priority = edit_as_new_configs[0].get('priority', 99)
+                await self.process_message(event.message, priority, edit_as_new_configs)
+                return
+
+            # Procesar el mensaje editado estándar a través del sistema de cache
             await self.handle_message_edit(event.message)
+
+        # Lanzar tareas de Auto-Refresh para bots interactivos configurados
+        started_refresh_keys = set()
+        for src_key, cfgs in self.replication_map.items():
+            if isinstance(src_key, str) and any(
+                isinstance(k, int) and v is cfgs for k, v in self.replication_map.items()
+            ):
+                continue
+            cfg_list = cfgs if isinstance(cfgs, list) else [cfgs]
+            refresh_cfgs = [c for c in cfg_list if c.get('auto_refresh_minutes')]
+            if refresh_cfgs and src_key not in started_refresh_keys:
+                started_refresh_keys.add(src_key)
+                interval_min = min(float(c['auto_refresh_minutes']) for c in refresh_cfgs)
+                asyncio.create_task(self._auto_refresh_loop(src_key, refresh_cfgs, interval_min))
 
         logger.info("CLUB 10M Multi-Source Replicator Running...")
         await self.client.run_until_disconnected()
@@ -1248,10 +1401,14 @@ class TelegramReplicator:
         logger.info(f"Pipeline: Procesando mensaje de {source_name} ({source_id}). Msg ID: {msg_id}")
 
         # 1. Aplicar Filtros Manuales (Reemplazos y descartes por Zoom/Clases/Redes Sociales)
-        text_filtered = self.apply_manual_filters(original_text, source_name)
-        if not text_filtered:
-            logger.info(f"Pipeline: Mensaje {msg_id} descartado por filtros manuales.")
-            return
+        skip_promo_filters = all(c.get('skip_promo_filters', False) for c in configs)
+        if skip_promo_filters:
+            text_filtered = original_text
+        else:
+            text_filtered = self.apply_manual_filters(original_text, source_name)
+            if not text_filtered:
+                logger.info(f"Pipeline: Mensaje {msg_id} descartado por filtros manuales.")
+                return
 
         # 2. Preparar Traducciones según los motores de cada destino
         has_gemini_dest = any(self.is_gemini_enabled(c) for c in configs)
@@ -1295,7 +1452,7 @@ class TelegramReplicator:
                 continue
 
             # Descarte de seguridad post-traducción (VIP OPEN, cupos, slots, tragamonedas, etc.)
-            if dest_final_text:
+            if dest_final_text and not config.get('skip_promo_filters', False):
                 dest_upper = dest_final_text.upper()
                 if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS)\b', dest_upper):
                     logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener términos prohibidos (VIP OPEN / cupos / slots / pagos / pool).")
@@ -1318,8 +1475,9 @@ class TelegramReplicator:
                 engine_name = "Gemini IA" if use_gem else "Estándar"
                 logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id} [{engine_name}, prefix='{prefix}'].")
                 
-                # Guardar en cache para soporte de ediciones posteriores
-                message_cache.add_message(msg_id, sent_msg, prefix=prefix, sent_text=text_to_send)
+                # Guardar en cache para soporte de ediciones posteriores (solo si NO es edit_as_new)
+                if not config.get('edit_as_new', False):
+                    message_cache.add_message(msg_id, sent_msg, prefix=prefix, sent_text=text_to_send)
             except Exception as e:
                 logger.error(f"Pipeline: ERROR enviando Msg {msg_id} a {dest_id}: {e}")
 
