@@ -1395,6 +1395,17 @@ class TelegramReplicator:
         logger.warning("Gemini: Todos los modelos de IA fallaron o no están disponibles. Mensaje NO será traducido (grupos Gemini no usan Google Translate).")
         return None
 
+    def _contains_bot_commands(self, text: str) -> bool:
+        """Detecta comandos de Telegram (/signal, /start, /help, etc.) o menciones a comandos."""
+        if not text:
+            return False
+        # Comandos tipo /signal, /start, /help (sin afectar pares como XAU/USD, fechas 17/11/2026 ni URLs)
+        if re.search(r'(?<![A-Za-z0-9/:])/[a-zA-Z][a-zA-Z0-9_]{1,31}\b', text):
+            return True
+        if re.search(r'\b(COMANDO|COMANDOS|COMMAND|COMMANDS)\b', text, flags=re.IGNORECASE):
+            return True
+        return False
+
     # --- PIPELINE ---
     async def process_message(self, message: Message, priority: int, configs: list):
         source_id = str(message.chat_id)
@@ -1405,6 +1416,11 @@ class TelegramReplicator:
         # Verificar si al menos un destino permite multimedia si no hay texto
         any_media_allowed = any(c.get('allow_media') for c in configs)
         if not original_text and not (message.media and any_media_allowed):
+            return
+
+        # 0. Descartar mensajes con comandos de bot (/signal, /start, /help, "comandos", "commands")
+        if self._contains_bot_commands(original_text):
+            logger.info(f"Pipeline: Mensaje {msg_id} de {source_name} descartado por contener comandos de bot (/signal, comandos, etc.).")
             return
 
         # 0. Descartar GIFs completamente (Gif + Texto acompañante)
@@ -1486,6 +1502,11 @@ class TelegramReplicator:
                 )
                 continue
 
+            # Descarte de seguridad post-traducción para comandos de bot (aplica a TODOS los grupos)
+            if dest_final_text and self._contains_bot_commands(dest_final_text):
+                logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener comandos de bot.")
+                continue
+
             # Descarte de seguridad post-traducción (VIP OPEN, cupos, slots, tragamonedas, etc.)
             if dest_final_text and not config.get('skip_promo_filters', False):
                 dest_upper = dest_final_text.upper()
@@ -1527,6 +1548,9 @@ class TelegramReplicator:
         logger.info(f"Edit: Detectada edición en Msg {msg_id}. Procesando actualización...")
         
         original_text = self.normalize_text(message.text or "")
+        if self._contains_bot_commands(original_text):
+            logger.info(f"Edit: Msg {msg_id} edición descartada por contener comandos de bot.")
+            return
         
         # Reprocesar el texto a través del pipeline de filtros
         text_filtered = self.apply_manual_filters(original_text)
