@@ -56,6 +56,15 @@ REPLICATION_MAP = {
             "skip_promo_filters": True,
             "incoming_only": True
         }
+    ],
+    -1001754381715: [
+        {"dest": -1003706226109, "name": "Gold Trigger", "priority": 1, "allow_media": True}
+    ],
+    -1002863649652: [
+        {"dest": -1004393262504, "name": "NEBULA LUX", "priority": 1, "allow_media": True}
+    ],
+    -1001948580252: [
+        {"dest": -1004278563406, "name": "SILVER VIP", "priority": 1, "allow_media": True}
     ]
 }
 
