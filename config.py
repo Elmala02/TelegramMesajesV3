@@ -51,8 +51,11 @@ REPLICATION_MAP = {
             "priority": 1,
             "allow_media": False,
             "edit_as_new": True,
-            "auto_refresh_minutes": 30,
+            "auto_refresh_minutes": 60,
             "refresh_button_text": "REFRESH",
+            "target_timeframe_button": "H1",
+            "target_asset_button": "XAUUSD",
+            "club10_style": True,
             "skip_promo_filters": True,
             "incoming_only": True
         }

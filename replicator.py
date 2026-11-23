@@ -769,8 +769,19 @@ class TelegramReplicator:
             return []
         return configs if isinstance(configs, list) else [configs]
 
+    def _find_button_coords(self, msg, pattern: str):
+        """Busca un botón inline por regex en el mensaje y devuelve (row, col, text)."""
+        if not msg or not getattr(msg, 'buttons', None):
+            return None
+        for r_idx, row in enumerate(msg.buttons):
+            for c_idx, btn in enumerate(row):
+                btn_text = (getattr(btn, 'text', '') or '').strip()
+                if re.search(pattern, btn_text, re.IGNORECASE):
+                    return (r_idx, c_idx, btn_text)
+        return None
+
     async def _trigger_refresh_once(self, source_key, refresh_cfgs, reason="Auto-Refresh"):
-        """Hace clic en el botón REFRESH del último mensaje del bot y garantiza envío (Opción A)."""
+        """Hace clic en el botón REFRESH del último mensaje del bot (asegurando activo y temporalidad) y garantiza envío."""
         source_name = refresh_cfgs[0].get('name', str(source_key))
         btn_keyword = str(refresh_cfgs[0].get('refresh_button_text', 'REFRESH')).upper()
 
@@ -780,34 +791,74 @@ class TelegramReplicator:
             return
 
         target_msg = None
-        target_coords = None
         async for msg in self.client.iter_messages(source_key, limit=15):
             if msg.out or not msg.buttons:
                 continue
-            for r_idx, row in enumerate(msg.buttons):
-                for c_idx, btn in enumerate(row):
-                    btn_text = (getattr(btn, 'text', '') or '').upper()
-                    if btn_keyword in btn_text:
-                        target_msg = msg
-                        target_coords = (r_idx, c_idx)
-                        break
-                if target_msg:
-                    break
-            if target_msg:
-                break
+            target_msg = msg
+            break
 
         if not target_msg:
             logger.warning(
-                f"{reason} ({source_name}): No se encontró mensaje reciente con botón '{btn_keyword}'."
+                f"{reason} ({source_name}): No se encontró mensaje reciente con botones interactivos."
             )
+            return
+
+        # 1. Asegurar Activo (ej: XAUUSD / GOLD) si está configurado
+        target_asset = refresh_cfgs[0].get('target_asset_button')
+        if target_asset:
+            txt_now = (target_msg.text or "").upper()
+            if not any(k in txt_now for k in ["XAU", "GOLD", "ORO"]):
+                coords_asset = self._find_button_coords(target_msg, rf'\b{re.escape(target_asset)}\b|XAU\s*/?\s*USD|\bGOLD\b')
+                if coords_asset:
+                    logger.info(f"{reason} ({source_name}): Seleccionando activo {target_asset} (botón '{coords_asset[2]}')...")
+                    try:
+                        await target_msg.click(coords_asset[0], coords_asset[1])
+                        await asyncio.sleep(2.5)
+                        fresh_asset = await self.client.get_messages(source_key, ids=target_msg.id)
+                        if fresh_asset and fresh_asset.buttons:
+                            target_msg = fresh_asset
+                    except Exception as e_asset:
+                        logger.warning(f"{reason} ({source_name}): Aviso al seleccionar {target_asset}: {e_asset}")
+
+        # 2. Asegurar Temporalidad (ej: H1) si está configurada
+        target_tf = refresh_cfgs[0].get('target_timeframe_button')
+        if target_tf:
+            txt_now = (target_msg.text or "").upper()
+            if not re.search(rf'\({re.escape(target_tf)}\)|\b{re.escape(target_tf)}\b', txt_now):
+                coords_tf = self._find_button_coords(target_msg, rf'^(?:⏰\s*)?{re.escape(target_tf)}$|\b{re.escape(target_tf)}\b')
+                if coords_tf:
+                    logger.info(f"{reason} ({source_name}): Cambiando temporalidad a {target_tf} (botón '{coords_tf[2]}')...")
+                    try:
+                        await target_msg.click(coords_tf[0], coords_tf[1])
+                        await asyncio.sleep(2.5)
+                        fresh_tf = await self.client.get_messages(source_key, ids=target_msg.id)
+                        if fresh_tf and fresh_tf.buttons:
+                            target_msg = fresh_tf
+                    except Exception as e_tf:
+                        logger.warning(f"{reason} ({source_name}): Aviso al cambiar a temporalidad {target_tf}: {e_tf}")
+
+        # 3. Presionar botón REFRESH
+        coords_refresh = self._find_button_coords(target_msg, rf'{re.escape(btn_keyword)}')
+        if not coords_refresh:
+            for r_idx, row in enumerate(target_msg.buttons or []):
+                for c_idx, btn in enumerate(row):
+                    b_txt = (getattr(btn, 'text', '') or '').upper()
+                    if btn_keyword in b_txt:
+                        coords_refresh = (r_idx, c_idx, b_txt)
+                        break
+                if coords_refresh:
+                    break
+
+        if not coords_refresh:
+            logger.warning(f"{reason} ({source_name}): No se encontró botón '{btn_keyword}' tras verificar opciones.")
             return
 
         ts_before = time.time()
         logger.info(
-            f"{reason} ({source_name}): Haciendo clic en botón '{btn_keyword}' del Msg {target_msg.id}..."
+            f"{reason} ({source_name}): Haciendo clic en botón '{coords_refresh[2]}' del Msg {target_msg.id}..."
         )
         try:
-            await target_msg.click(target_coords[0], target_coords[1])
+            await target_msg.click(coords_refresh[0], coords_refresh[1])
         except Exception as e_click:
             logger.warning(f"{reason} ({source_name}): Aviso al hacer clic en '{btn_keyword}': {e_click}")
 
@@ -1229,6 +1280,110 @@ class TelegramReplicator:
                 
         return "\n".join(lines)
 
+    def format_neuraltrade_club10(self, text: str) -> str:
+        """Formatea señales de NeuralTradeML / Mind con el estilo limpio y decorado de CLUB 10M."""
+        if not text:
+            return None
+        text_upper = text.upper()
+        
+        # 1. Dirección (BUY o SELL)
+        direction = None
+        if 'BUY' in text_upper or 'COMPRA' in text_upper:
+            direction = 'BUY'
+            dir_emoji = '🟢'
+        elif 'SELL' in text_upper or 'VENTA' in text_upper:
+            direction = 'SELL'
+            dir_emoji = '🔴'
+            
+        if not direction:
+            return None  # Si no tiene BUY/SELL, no es una señal estándar a redecorar
+            
+        # 2. Activo y Temporalidad
+        asset_match = re.search(r'([A-Z]{3,6}/[A-Z]{3,6}|XAUUSD|XAGUSD|EURUSD|GBPUSD|USDJPY|AUDCAD|GOLD|ORO)\s*(?:\(([A-Za-z0-9]+)\))?', text, re.I)
+        asset_name = 'XAU/USD'
+        timeframe = 'H1'
+        if asset_match:
+            cand_asset = asset_match.group(1).strip().upper()
+            if any(g in cand_asset for g in ['XAU', 'GOLD', 'ORO']):
+                asset_name = 'XAU/USD'
+            else:
+                asset_name = cand_asset
+            if asset_match.group(2):
+                timeframe = asset_match.group(2).strip().upper()
+
+        if re.search(r'\bH1\b', text, re.I):
+            timeframe = 'H1'
+
+        # 3. Entrada (Óptima preferente, o correcta, o general)
+        entry_match = re.search(r'ENTRY\s*\([^)]*óptim[^)]*\)[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+        if not entry_match:
+            entry_match = re.search(r'ENTRY\s*\([^)]*optimal[^)]*\)[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+        if not entry_match:
+            entry_match = re.search(r'ENTRY\s*\([^)]*correct[^)]*\)[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+        if not entry_match:
+            entry_match = re.search(r'ENTRY\s*[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+            
+        entry_str = 'Mercado'
+        if entry_match:
+            raw_e = entry_match.group(1).strip().replace(',', '.')
+            raw_e = re.sub(r'\s*[–—−]\s*', ' - ', raw_e)
+            if '-' in raw_e:
+                parts = [p.strip().strip('.') for p in raw_e.split('-')]
+                if len(parts) >= 2 and parts[0] and parts[1]:
+                    entry_str = f"{parts[0]} - {parts[1]}"
+                else:
+                    entry_str = raw_e.strip()
+            else:
+                entry_str = raw_e.strip()
+
+        # 4. Stop Loss (TRADE SL prioritario, luego HARD SL, luego SL genérico)
+        sl_match = re.search(r'TRADE\s*SL[:\s]*([0-9\.,]+)', text, re.I)
+        if not sl_match:
+            sl_match = re.search(r'HARD\s*SL[:\s]*([0-9\.,]+)', text, re.I)
+        if not sl_match:
+            sl_match = re.search(r'(?:STOP\s*LOSS|SL)[:\s]*([0-9\.,]+)', text, re.I)
+            
+        sl_str = 'No definido'
+        if sl_match:
+            sl_str = sl_match.group(1).strip().replace(',', '.').strip('.')
+
+        # 5. Take Profits (TP1 .. TP5)
+        tps = []
+        tp_emojis = ['🥇', '🥈', '🥉', '🎖️', '🚀']
+        for i in range(1, 6):
+            tp_m = re.search(rf'TP\s*{i}[:\s]*([0-9\.,]+)', text, re.I)
+            if tp_m:
+                val = tp_m.group(1).strip().replace(',', '.').strip('.')
+                emoji = tp_emojis[i-1] if i-1 < len(tp_emojis) else '🎯'
+                tps.append(f"{emoji} **TP{i}:** {val}")
+
+        # 6. Confianza IA / ML
+        conf_match = re.search(r'(?:aprendizaje\s*automático|machine\s*learning|ml\s*score|confianza|confidence)[:\s]*(\d+)', text, re.I)
+        conf_str = f"{conf_match.group(1)}%" if conf_match else None
+
+        # Ensamblar mensaje estilo CLUB 10M
+        op_suffix = "GOLD" if "XAU" in asset_name or "GOLD" in asset_name else asset_name
+        lines = [
+            "👑 **CLUB 10M | SEÑAL VIP** 👑",
+            "",
+            f"💎 **ACTIVO:** {asset_name} ({timeframe})",
+            f"{dir_emoji} **OPERACIÓN:** {direction} {op_suffix}",
+            f"🎯 **ENTRADA:** {entry_str}",
+            f"🛑 **STOP LOSS:** {sl_str}",
+            "",
+            "🎯 **OBJETIVOS:**"
+        ]
+        if tps:
+            lines.extend(tps)
+        else:
+            lines.append("🥇 **TP1:** Abierto")
+
+        if conf_str:
+            lines.append("")
+            lines.append(f"🤖 **CONFIANZA IA:** {conf_str}")
+            
+        return "\n".join(lines)
+
     def is_gemini_enabled(self, config: dict) -> bool:
         """Verifica si un destino tiene habilitada la traducción con Gemini."""
         if not isinstance(config, dict):
@@ -1464,6 +1619,13 @@ class TelegramReplicator:
                 logger.info(f"Pipeline: Mensaje {msg_id} descartado por filtros manuales.")
                 return
 
+        # Comprobar si algún destino tiene habilitado club10_style (ej. NeuralTradeML)
+        neural_club10_text = None
+        if any(c.get('club10_style', False) for c in configs):
+            neural_club10_text = self.format_neuraltrade_club10(original_text or text_filtered)
+            if neural_club10_text:
+                logger.info(f"Pipeline: Mensaje {msg_id} de {source_name} decorado exitosamente al estilo CLUB 10M.")
+
         # 2. Preparar Traducciones según los motores de cada destino
         has_gemini_dest = any(self.is_gemini_enabled(c) for c in configs)
         has_standard_dest = any(not self.is_gemini_enabled(c) for c in configs)
@@ -1477,9 +1639,12 @@ class TelegramReplicator:
             gemini_text = self.sanitize_text(gemini_res) if gemini_res is not None else None
 
         if has_standard_dest:
-            logger.info("Pipeline: Usando traducción ASÍNCRONA estándar para destinos regulares...")
-            std_res = await self.smart_fragment_translation_async(text_filtered)
-            standard_text = self.sanitize_text(std_res) if std_res is not None else None
+            if neural_club10_text and all(c.get('club10_style', False) for c in configs):
+                standard_text = neural_club10_text
+            else:
+                logger.info("Pipeline: Usando traducción ASÍNCRONA estándar para destinos regulares...")
+                std_res = await self.smart_fragment_translation_async(text_filtered)
+                standard_text = self.sanitize_text(std_res) if std_res is not None else None
 
         # 3. Publicar en todos los destinos configurados
         for config in configs:
@@ -1494,7 +1659,10 @@ class TelegramReplicator:
                 prefix = f"**REENVIADO POR {clean_prefix}**"
 
             use_gem = self.is_gemini_enabled(config)
-            dest_final_text = gemini_text if use_gem else standard_text
+            if config.get('club10_style') and neural_club10_text:
+                dest_final_text = neural_club10_text
+            else:
+                dest_final_text = gemini_text if use_gem else standard_text
 
             # SI EL TEXTO ERA REQUERIDO PERO LA TRADUCCIÓN FALLÓ COMPLETAMENTE (dest_final_text IS NONE):
             if dest_final_text is None and text_filtered:
