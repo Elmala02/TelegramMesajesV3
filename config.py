@@ -65,6 +65,9 @@ REPLICATION_MAP = {
     ],
     -1001948580252: [
         {"dest": -1004278563406, "name": "SILVER VIP", "priority": 1, "allow_media": True}
+    ],
+    -1001484000474: [
+        {"dest": -1004457486115, "name": "BALANCE ÉLITE ⚖️👑", "priority": 1, "allow_media": False}
     ]
 }
 
