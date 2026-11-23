@@ -63,7 +63,7 @@ REPLICATION_MAP = {
     -1001754381715: [
         {"dest": -1003706226109, "name": "Gold Trigger", "priority": 1, "allow_media": False}
     ],
-    -1002863649652: [
+    -1001610937993: [
         {"dest": -1004393262504, "name": "NEBULA LUX", "priority": 1, "allow_media": False}
     ],
     -1001948580252: [
