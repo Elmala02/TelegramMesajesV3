@@ -829,7 +829,7 @@ class TelegramReplicator:
         target_tf = refresh_cfgs[0].get('target_timeframe_button')
         if target_tf:
             txt_now = (target_msg.text or "").upper()
-            if not re.search(rf'\({re.escape(target_tf)}\)|\b{re.escape(target_tf)}\b', txt_now):
+            if not re.search(rf'\({re.escape(target_tf)}\)', txt_now):
                 coords_tf = self._find_button_coords(target_msg, rf'^(?:⏰\s*)?{re.escape(target_tf)}$|\b{re.escape(target_tf)}\b')
                 if coords_tf:
                     logger.info(f"{reason} ({source_name}): Cambiando temporalidad a {target_tf} (botón '{coords_tf[2]}')...")
@@ -867,11 +867,20 @@ class TelegramReplicator:
         except Exception as e_click:
             logger.warning(f"{reason} ({source_name}): Aviso al hacer clic en '{btn_keyword}': {e_click}")
 
-        # Esperar a que el bot termine de calcular y edite el mensaje (7s)
+        # Esperar a que el bot termine de calcular y edite o envíe el mensaje (7s)
         await asyncio.sleep(7)
 
-        fresh_msg = await self.client.get_messages(source_key, ids=target_msg.id)
-        msg_to_send = fresh_msg if fresh_msg else target_msg
+        # Buscar si envió un mensaje nuevo o si editó el mensaje actual
+        latest_msgs = await self.client.get_messages(source_key, limit=3)
+        msg_to_send = None
+        for m in (latest_msgs or []):
+            if not getattr(m, 'out', False) and not self._is_loading_placeholder(m.text or ""):
+                msg_to_send = m
+                break
+        if not msg_to_send:
+            fresh_msg = await self.client.get_messages(source_key, ids=target_msg.id)
+            msg_to_send = fresh_msg if fresh_msg else target_msg
+
         if msg_to_send and not self._is_loading_placeholder(msg_to_send.text or ""):
             priority = valid_configs[0].get('priority', 99)
             await self.process_message(msg_to_send, priority, valid_configs)
@@ -1285,7 +1294,7 @@ class TelegramReplicator:
         return "\n".join(lines)
 
     def format_neuraltrade_club10(self, text: str) -> str:
-        """Formatea señales de NeuralTradeML / Mind con el estilo limpio y decorado de CLUB 10M."""
+        """Formatea señales de NeuralTradeML / Mind con el estilo completo, decorado y elegante de CLUB 10M."""
         if not text:
             return None
         text_upper = text.upper()
@@ -1315,47 +1324,76 @@ class TelegramReplicator:
             if asset_match.group(2):
                 timeframe = asset_match.group(2).strip().upper()
 
-        # 3. Entrada (Universal)
-        entry_match = re.search(r'(?:ENTRY|ENTRADA)[^\n\d]*(\d{4,}(?:[.,]\d+)?\s*[-–—−]\s*\d{4,}(?:[.,]\d+)?)', text, re.I)
-        if not entry_match:
-            entry_match = re.search(r'(?:ENTRY|ENTRADA)\s*(?:\([^)]*\))?\s*[:\-]\s*([0-9\.,\s–—−-]+)', text, re.I)
-        if not entry_match:
-            entry_match = re.search(r'(?:ENTRY|ENTRADA)\s*[:\s]*([0-9\.,]+)', text, re.I)
-            
-        if not entry_match:
+        def clean_val(v):
+            if not v:
+                return ''
+            v = v.strip().replace(',', '.')
+            v = re.sub(r'\s*[–—−]\s*', ' - ', v)
+            v = re.sub(r'\s+', ' ', v)
+            return v
+
+        def format_range(s):
+            if not s:
+                return None
+            if '-' in s:
+                parts = [p.strip().strip('.') for p in s.split('-')]
+                if len(parts) >= 2 and parts[0] and parts[1]:
+                    return f"{parts[0]} - {parts[1]}"
+            return s.strip()
+
+        # 3. Precio Actual
+        curr_match = re.search(r'(?:Current|Actual)[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
+        curr_val = clean_val(curr_match.group(1)) if curr_match else None
+
+        # 4. Entradas (Óptima / Extendida / General)
+        best_entry_m = re.search(r'(?:ENTRY|ENTRADA)\s*\((?:best|óptimo|optim)[^)]*\)[^\n\d]*([0-9\.,\s–—−-]+)', text, re.I)
+        ok_entry_m = re.search(r'(?:ENTRY|ENTRADA)\s*\((?:ok|correcto|correct)[^)]*\)[^\n\d]*([0-9\.,\s–—−-]+)', text, re.I)
+        gen_entry_m = re.search(r'(?:ENTRY|ENTRADA)[^\n\d]*(\d+(?:[.,]\d+)?\s*[-–—−]\s*\d+(?:[.,]\d+)?)', text, re.I)
+        if not gen_entry_m:
+            gen_entry_m = re.search(r'(?:ENTRY|ENTRADA)\s*(?:\([^)]*\))?\s*[:\-]\s*([0-9\.,\s–—−-]+)', text, re.I)
+
+        entry_best_str = format_range(clean_val(best_entry_m.group(1))) if best_entry_m else None
+        entry_ok_str = format_range(clean_val(ok_entry_m.group(1))) if ok_entry_m else None
+        entry_gen_str = format_range(clean_val(gen_entry_m.group(1))) if gen_entry_m else None
+
+        if not entry_best_str and not entry_ok_str and not entry_gen_str:
             logger.info(f"format_neuraltrade_club10: No se detectó Entrada en: {repr(text[:120])}")
             return None
 
-        raw_e = entry_match.group(1).strip().replace(',', '.')
-        raw_e = re.sub(r'\s*[–—−]\s*', ' - ', raw_e)
-        if '-' in raw_e:
-            parts = [p.strip().strip('.') for p in raw_e.split('-')]
-            if len(parts) >= 2 and parts[0] and parts[1]:
-                entry_str = f"{parts[0]} - {parts[1]}"
+        # 5. No Chase (No perseguir por encima/debajo)
+        no_chase_m = re.search(r'(?:No\s*chase|No\s*hay\s*persecuci[óo]n)\s*(below|above|arriba|abajo)?[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
+        no_chase_str = None
+        if no_chase_m:
+            side_raw = (no_chase_m.group(1) or '').lower()
+            nc_val = clean_val(no_chase_m.group(2))
+            if any(w in side_raw for w in ['below', 'abajo']):
+                no_chase_str = f"Por debajo de {nc_val}"
+            elif any(w in side_raw for w in ['above', 'arriba']):
+                no_chase_str = f"Por encima de {nc_val}"
             else:
-                entry_str = raw_e.strip()
-        else:
-            entry_str = raw_e.strip()
+                no_chase_str = nc_val
 
-        if not entry_str or not any(c.isdigit() for c in entry_str):
-            logger.info(f"format_neuraltrade_club10: Entrada vacía o sin dígitos: {repr(raw_e)}")
-            return None
+        # 6. Stop Loss (Trade SL y Hard SL)
+        trade_sl_m = re.search(r'TRADE\s*SL[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
+        hard_sl_m = re.search(r'HARD\s*SL[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
+        gen_sl_m = re.search(r'(?:STOP\s*LOSS|\bSL\b|PARADAS?)[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
 
-        # 4. Stop Loss (Universal)
-        sl_match = re.search(r'(?:TRADE\s*SL|HARD\s*SL|STOP\s*LOSS|\bSL\b|PARADAS?)[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
-        if not sl_match:
+        trade_sl_str = clean_val(trade_sl_m.group(1)) if trade_sl_m else None
+        hard_sl_str = clean_val(hard_sl_m.group(1)) if hard_sl_m else None
+        gen_sl_str = clean_val(gen_sl_m.group(1)) if gen_sl_m else None
+
+        main_sl = trade_sl_str or gen_sl_str
+        if not main_sl:
             logger.info(f"format_neuraltrade_club10: No se detectó Stop Loss en: {repr(text[:120])}")
             return None
 
-        sl_str = sl_match.group(1).strip().replace(',', '.').strip('.')
-
-        # 5. Take Profits (Universal)
+        # 7. Take Profits (TP1 .. TP5)
         tps = []
         tp_emojis = ['🥇', '🥈', '🥉', '🎖️', '🚀']
         for i in range(1, 6):
             tp_m = re.search(rf'(?:TP|TARGET|OBJETIVO|TAKE\s*PROFIT)\s*{i}[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
             if tp_m:
-                val = tp_m.group(1).strip().replace(',', '.').strip('.')
+                val = clean_val(tp_m.group(1))
                 emoji = tp_emojis[i-1] if i-1 < len(tp_emojis) else '🎯'
                 tps.append(f"{emoji} **TP{i}:** {val}")
 
@@ -1363,29 +1401,99 @@ class TelegramReplicator:
             logger.info(f"format_neuraltrade_club10: No se detectaron Take Profits en: {repr(text[:120])}")
             return None
 
-        # 6. Confianza IA / ML (prioriza Machine Learning score, luego Direction Confidence)
-        conf_match = re.search(r'machine\s*learning\s*(?:score)?[:\s]*(\d+)', text, re.I)
-        if not conf_match:
-            conf_match = re.search(r'(?:aprendizaje\s*automático|ml\s*score|direction\s*confidence|confidence|confianza)[:\s]*(\d+)', text, re.I)
-        conf_str = f"{conf_match.group(1)}%" if conf_match else None
+        # 8. Ventana de Entrada y Validez
+        win_m = re.search(r'(?:Best\s*entry\s*window|Mejor\s*ventana\s*ENTRY)[:\s]*([^\n\r]+)', text, re.I)
+        enter_by_m = re.search(r'(?:Enter\s*by|Ingrese\s*antes\s*de)[:\s]*([^\n\r]+)', text, re.I)
+        valid_m = re.search(r'(?:Valid\s*until|V[áa]lido\s*hasta)[:\s]*([^\n\r]+)', text, re.I)
 
-        # Ensamblar mensaje estilo CLUB 10M
+        window_str = clean_val(win_m.group(1)) if win_m else None
+        enter_by_str = clean_val(enter_by_m.group(1)) if enter_by_m else None
+        valid_str = clean_val(valid_m.group(1)) if valid_m else None
+
+        # 9. Confianza IA / Machine Learning
+        ml_m = re.search(r'(?:Machine\s*Learning\s*Score|Puntuaci[óo]n\s*de\s*aprendizaje\s*autom[áa]tico)[:\s]*(\d+)', text, re.I)
+        conf_m = re.search(r'(?:Direction\s*Confidence|Confianza\s*en\s*la\s*direcci[óo]n)[:\s]*(\d+)', text, re.I)
+        ml_val = ml_m.group(1) if ml_m else None
+        conf_val = conf_m.group(1) if conf_m else None
+
+        ai_conf_str = None
+        if ml_val and conf_val:
+            ai_conf_str = f"{ml_val}% (Dirección: {conf_val}%)"
+        elif ml_val:
+            ai_conf_str = f"{ml_val}%"
+        elif conf_val:
+            ai_conf_str = f"{conf_val}%"
+
+        # 10. Gestión de Riesgo
+        gest_m = re.search(r'(?:still\s*open\s*at|OPEN\s*a\s*las|abierta\s*a\s*las)\s*([0-9]{1,2}:[0-9]{2}(?:\s*(?:UK|Reino\s*Unido|[A-Za-z]{2,4}))?)', text, re.I)
+        gestion_str = None
+        if gest_m:
+            hora_gest = gest_m.group(1).strip()
+            gestion_str = f"Si sigue abierta a las {hora_gest} y TP1 no alcanzado: reducir riesgo / salir en retroceso."
+
+        # 11. ID de Señal (evita falsos positivos como la terminación de Confidence)
+        id_m = re.search(r'\b(?:ID|Identificaci[óo]n)[:\s]+([A-Za-z0-9]{6,15})\b', text, re.I)
+        sig_id = id_m.group(1).strip() if id_m else None
+
+        # Ensamblar mensaje completo estilo CLUB 10M VIP
         op_suffix = "GOLD" if "XAU" in asset_name or "GOLD" in asset_name else asset_name
         lines = [
             "👑 **CLUB 10M | SEÑAL VIP** 👑",
             "",
             f"💎 **ACTIVO:** {asset_name} ({timeframe})",
-            f"{dir_emoji} **OPERACIÓN:** {direction} {op_suffix}",
-            f"🎯 **ENTRADA:** {entry_str}",
-            f"🛑 **STOP LOSS:** {sl_str}",
-            "",
-            "🎯 **OBJETIVOS:**"
+            f"{dir_emoji} **OPERACIÓN:** {direction} {op_suffix}"
         ]
+
+        if curr_val:
+            lines.append(f"💵 **PRECIO ACTUAL:** {curr_val}")
+
+        if entry_best_str and entry_ok_str:
+            lines.append(f"🎯 **ENTRADA ÓPTIMA:** {entry_best_str}")
+            lines.append(f"📍 **ENTRADA EXTENDIDA:** {entry_ok_str}")
+        elif entry_best_str:
+            lines.append(f"🎯 **ENTRADA:** {entry_best_str}")
+        elif entry_gen_str:
+            lines.append(f"🎯 **ENTRADA:** {entry_gen_str}")
+
+        if no_chase_str:
+            lines.append(f"⚠️ **NO PERSEGUIR:** {no_chase_str}")
+
+        lines.append(f"🛑 **STOP LOSS:** {main_sl}")
+        if hard_sl_str:
+            lines.append(f"🛡️ **HARD SL:** {hard_sl_str}")
+
+        lines.append("")
+        lines.append("🎯 **OBJETIVOS:**")
         lines.extend(tps)
-        if conf_str:
+
+        # Bloque de Tiempos
+        time_lines = []
+        if window_str:
+            if enter_by_str:
+                time_lines.append(f"⏰ **VENTANA DE ENTRADA:** {window_str} (Entrar antes de {enter_by_str})")
+            else:
+                time_lines.append(f"⏰ **VENTANA DE ENTRADA:** {window_str}")
+        elif enter_by_str:
+            time_lines.append(f"⏰ **ENTRAR ANTES DE:** {enter_by_str}")
+
+        if valid_str:
+            time_lines.append(f"⏳ **VÁLIDO HASTA:** {valid_str}")
+
+        if time_lines:
             lines.append("")
-            lines.append(f"🤖 **CONFIANZA IA:** {conf_str}")
-            
+            lines.extend(time_lines)
+
+        if ai_conf_str:
+            lines.append("")
+            lines.append(f"🤖 **CONFIANZA IA:** {ai_conf_str}")
+
+        if gestion_str:
+            lines.append("")
+            lines.append(f"💡 **GESTIÓN:** {gestion_str}")
+
+        if sig_id:
+            lines.append(f"🔖 **ID:** `{sig_id}`")
+
         return "\n".join(lines)
 
     def is_gemini_enabled(self, config: dict) -> bool:
