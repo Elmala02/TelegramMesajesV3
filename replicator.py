@@ -748,11 +748,16 @@ class TelegramReplicator:
         if not text:
             return True
         clean = text.strip().lower()
-        if len(clean) > 60:
-            return False
-        loading_markers = ["refreshing", "loading", "cargando", "actualizando", "please wait", "espere", "⏳"]
-        has_signal_data = any(k in clean for k in ["buy", "sell", "entry", "tp1", "sl", "id:"])
-        return any(m in clean for m in loading_markers) and not has_signal_data
+        loading_markers = [
+            "refreshing", "loading", "cargando", "actualizando", 
+            "calculating", "calculando", "please wait", "espere", "⏳", "🔄"
+        ]
+        is_loading = any(m in clean for m in loading_markers)
+        # Una señal completa real SIEMPRE tiene niveles de TP y Stop Loss
+        has_complete_signal = any(f"tp{i}" in clean for i in range(1, 4)) and any(s in clean for s in ["sl", "stop loss", "trade sl"])
+        if is_loading and not has_complete_signal:
+            return True
+        return False
 
     async def _get_configs_for_event(self, event):
         chat_id = event.chat_id
@@ -862,24 +867,14 @@ class TelegramReplicator:
         except Exception as e_click:
             logger.warning(f"{reason} ({source_name}): Aviso al hacer clic en '{btn_keyword}': {e_click}")
 
-        # Esperar a que el bot edite o envíe un nuevo mensaje (6s)
-        await asyncio.sleep(6)
+        # Esperar a que el bot termine de calcular y edite el mensaje (7s)
+        await asyncio.sleep(7)
 
-        last_ev_ts = self._last_bot_event_ts.get(str(target_msg.chat_id), 0.0)
-        if last_ev_ts >= ts_before:
-            logger.info(f"{reason} ({source_name}): Señal actualizada recibida y enviada por evento.")
-        else:
-            # Opción A: si Telegram no disparó MessageEdited porque el texto no cambió,
-            # re-leemos el mensaje y lo enviamos igual como mensaje nuevo
-            logger.info(
-                f"{reason} ({source_name}): Sin evento de edición tras clic (texto sin cambios). "
-                f"Enviando señal vigente como mensaje nuevo..."
-            )
-            fresh_msg = await self.client.get_messages(source_key, ids=target_msg.id)
-            msg_to_send = fresh_msg if fresh_msg else target_msg
-            if msg_to_send and not self._is_loading_placeholder(msg_to_send.text or ""):
-                priority = valid_configs[0].get('priority', 99)
-                await self.process_message(msg_to_send, priority, valid_configs)
+        fresh_msg = await self.client.get_messages(source_key, ids=target_msg.id)
+        msg_to_send = fresh_msg if fresh_msg else target_msg
+        if msg_to_send and not self._is_loading_placeholder(msg_to_send.text or ""):
+            priority = valid_configs[0].get('priority', 99)
+            await self.process_message(msg_to_send, priority, valid_configs)
 
     async def _auto_refresh_loop(self, source_key, refresh_cfgs, interval_minutes: float):
         """Presiona automáticamente el botón REFRESH en bots interactivos cada N minutos."""
@@ -1320,15 +1315,16 @@ class TelegramReplicator:
             if asset_match.group(2):
                 timeframe = asset_match.group(2).strip().upper()
 
-        # 3. Entrada (Óptima/best preferente, luego ok/correcto, luego general)
-        entry_match = re.search(r'ENTRY\s*\([^)]*(?:best|óptim|optim)[^)]*\)\s*[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+        # 3. Entrada (Universal)
+        entry_match = re.search(r'(?:ENTRY|ENTRADA)[^\n\d]*(\d{4,}(?:[.,]\d+)?\s*[-–—−]\s*\d{4,}(?:[.,]\d+)?)', text, re.I)
         if not entry_match:
-            entry_match = re.search(r'ENTRY\s*\([^)]*(?:ok|correct)[^)]*\)\s*[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+            entry_match = re.search(r'(?:ENTRY|ENTRADA)\s*(?:\([^)]*\))?\s*[:\-]\s*([0-9\.,\s–—−-]+)', text, re.I)
         if not entry_match:
-            entry_match = re.search(r'ENTRY\s*(?:\([^)]*\))?\s*[:\-]\s*([0-9\.,\s–—−-]+)', text, re.I)
+            entry_match = re.search(r'(?:ENTRY|ENTRADA)\s*[:\s]*([0-9\.,]+)', text, re.I)
             
         if not entry_match:
-            return None  # Señal incompleta sin entrada
+            logger.info(f"format_neuraltrade_club10: No se detectó Entrada en: {repr(text[:120])}")
+            return None
 
         raw_e = entry_match.group(1).strip().replace(',', '.')
         raw_e = re.sub(r'\s*[–—−]\s*', ' - ', raw_e)
@@ -1342,32 +1338,30 @@ class TelegramReplicator:
             entry_str = raw_e.strip()
 
         if not entry_str or not any(c.isdigit() for c in entry_str):
-            return None  # Entrada inválida o vacía
+            logger.info(f"format_neuraltrade_club10: Entrada vacía o sin dígitos: {repr(raw_e)}")
+            return None
 
-        # 4. Stop Loss (TRADE SL prioritario, luego HARD SL, luego SL genérico)
-        sl_match = re.search(r'TRADE\s*SL\s*[:\s]*([0-9\.,]+)', text, re.I)
+        # 4. Stop Loss (Universal)
+        sl_match = re.search(r'(?:TRADE\s*SL|HARD\s*SL|STOP\s*LOSS|\bSL\b|PARADAS?)[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
         if not sl_match:
-            sl_match = re.search(r'HARD\s*SL\s*[:\s]*([0-9\.,]+)', text, re.I)
-        if not sl_match:
-            sl_match = re.search(r'(?:STOP\s*LOSS|SL)\s*[:\s]*([0-9\.,]+)', text, re.I)
-            
-        if not sl_match:
-            return None  # Señal incompleta sin Stop Loss
+            logger.info(f"format_neuraltrade_club10: No se detectó Stop Loss en: {repr(text[:120])}")
+            return None
 
         sl_str = sl_match.group(1).strip().replace(',', '.').strip('.')
 
-        # 5. Take Profits (TP1 .. TP5)
+        # 5. Take Profits (Universal)
         tps = []
         tp_emojis = ['🥇', '🥈', '🥉', '🎖️', '🚀']
         for i in range(1, 6):
-            tp_m = re.search(rf'TP\s*{i}\s*[:\s]*([0-9\.,]+)', text, re.I)
+            tp_m = re.search(rf'(?:TP|TARGET|OBJETIVO|TAKE\s*PROFIT)\s*{i}[^\n\d]*([0-9]+(?:[.,][0-9]+)?)', text, re.I)
             if tp_m:
                 val = tp_m.group(1).strip().replace(',', '.').strip('.')
                 emoji = tp_emojis[i-1] if i-1 < len(tp_emojis) else '🎯'
                 tps.append(f"{emoji} **TP{i}:** {val}")
 
         if not tps:
-            return None  # Señal incompleta sin objetivos de TP
+            logger.info(f"format_neuraltrade_club10: No se detectaron Take Profits en: {repr(text[:120])}")
+            return None
 
         # 6. Confianza IA / ML (prioriza Machine Learning score, luego Direction Confidence)
         conf_match = re.search(r'machine\s*learning\s*(?:score)?[:\s]*(\d+)', text, re.I)
@@ -1632,9 +1626,15 @@ class TelegramReplicator:
         # Comprobar si algún destino tiene habilitado club10_style (ej. NeuralTradeML)
         neural_club10_text = None
         if any(c.get('club10_style', False) for c in configs):
+            logger.info(f"Pipeline: Procesando señal con estilo CLUB 10M para Msg {msg_id} ({len(original_text)} caracteres).")
             neural_club10_text = self.format_neuraltrade_club10(original_text or text_filtered)
             if neural_club10_text:
                 logger.info(f"Pipeline: Mensaje {msg_id} de {source_name} decorado exitosamente al estilo CLUB 10M.")
+            else:
+                logger.warning(
+                    f"Pipeline: Msg {msg_id} de {source_name} no pudo ser decorado como señal CLUB 10M. "
+                    f"Texto recibido:\n{repr((original_text or text_filtered)[:300])}"
+                )
 
         # 2. Preparar Traducciones según los motores de cada destino
         has_gemini_dest = any(self.is_gemini_enabled(c) for c in configs)
