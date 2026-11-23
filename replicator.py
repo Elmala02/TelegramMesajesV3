@@ -891,6 +891,15 @@ class TelegramReplicator:
             f"(botón '{btn_keyword}')."
         )
 
+        # Disparo inicial tras 5 segundos de arranque para asegurar que el bot esté en el activo y temporalidad deseados
+        try:
+            await asyncio.sleep(5)
+            await self._trigger_refresh_once(source_key, refresh_cfgs, reason="Auto-Refresh-Initial")
+        except asyncio.CancelledError:
+            return
+        except Exception as e_init:
+            logger.warning(f"Auto-Refresh ({source_name}): Aviso en ciclo inicial: {e_init}")
+
         while True:
             try:
                 await asyncio.sleep(interval_seconds)
@@ -1296,7 +1305,7 @@ class TelegramReplicator:
             dir_emoji = '🔴'
             
         if not direction:
-            return None  # Si no tiene BUY/SELL, no es una señal estándar a redecorar
+            return None
             
         # 2. Activo y Temporalidad
         asset_match = re.search(r'([A-Z]{3,6}/[A-Z]{3,6}|XAUUSD|XAGUSD|EURUSD|GBPUSD|USDJPY|AUDCAD|GOLD|ORO)\s*(?:\(([A-Za-z0-9]+)\))?', text, re.I)
@@ -1311,54 +1320,59 @@ class TelegramReplicator:
             if asset_match.group(2):
                 timeframe = asset_match.group(2).strip().upper()
 
-        if re.search(r'\bH1\b', text, re.I):
-            timeframe = 'H1'
-
-        # 3. Entrada (Óptima preferente, o correcta, o general)
-        entry_match = re.search(r'ENTRY\s*\([^)]*óptim[^)]*\)[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+        # 3. Entrada (Óptima/best preferente, luego ok/correcto, luego general)
+        entry_match = re.search(r'ENTRY\s*\([^)]*(?:best|óptim|optim)[^)]*\)\s*[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
         if not entry_match:
-            entry_match = re.search(r'ENTRY\s*\([^)]*optimal[^)]*\)[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+            entry_match = re.search(r'ENTRY\s*\([^)]*(?:ok|correct)[^)]*\)\s*[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
         if not entry_match:
-            entry_match = re.search(r'ENTRY\s*\([^)]*correct[^)]*\)[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
-        if not entry_match:
-            entry_match = re.search(r'ENTRY\s*[:\s]*([0-9\.,\s–—−-]+)', text, re.I)
+            entry_match = re.search(r'ENTRY\s*(?:\([^)]*\))?\s*[:\-]\s*([0-9\.,\s–—−-]+)', text, re.I)
             
-        entry_str = 'Mercado'
-        if entry_match:
-            raw_e = entry_match.group(1).strip().replace(',', '.')
-            raw_e = re.sub(r'\s*[–—−]\s*', ' - ', raw_e)
-            if '-' in raw_e:
-                parts = [p.strip().strip('.') for p in raw_e.split('-')]
-                if len(parts) >= 2 and parts[0] and parts[1]:
-                    entry_str = f"{parts[0]} - {parts[1]}"
-                else:
-                    entry_str = raw_e.strip()
+        if not entry_match:
+            return None  # Señal incompleta sin entrada
+
+        raw_e = entry_match.group(1).strip().replace(',', '.')
+        raw_e = re.sub(r'\s*[–—−]\s*', ' - ', raw_e)
+        if '-' in raw_e:
+            parts = [p.strip().strip('.') for p in raw_e.split('-')]
+            if len(parts) >= 2 and parts[0] and parts[1]:
+                entry_str = f"{parts[0]} - {parts[1]}"
             else:
                 entry_str = raw_e.strip()
+        else:
+            entry_str = raw_e.strip()
+
+        if not entry_str or not any(c.isdigit() for c in entry_str):
+            return None  # Entrada inválida o vacía
 
         # 4. Stop Loss (TRADE SL prioritario, luego HARD SL, luego SL genérico)
-        sl_match = re.search(r'TRADE\s*SL[:\s]*([0-9\.,]+)', text, re.I)
+        sl_match = re.search(r'TRADE\s*SL\s*[:\s]*([0-9\.,]+)', text, re.I)
         if not sl_match:
-            sl_match = re.search(r'HARD\s*SL[:\s]*([0-9\.,]+)', text, re.I)
+            sl_match = re.search(r'HARD\s*SL\s*[:\s]*([0-9\.,]+)', text, re.I)
         if not sl_match:
-            sl_match = re.search(r'(?:STOP\s*LOSS|SL)[:\s]*([0-9\.,]+)', text, re.I)
+            sl_match = re.search(r'(?:STOP\s*LOSS|SL)\s*[:\s]*([0-9\.,]+)', text, re.I)
             
-        sl_str = 'No definido'
-        if sl_match:
-            sl_str = sl_match.group(1).strip().replace(',', '.').strip('.')
+        if not sl_match:
+            return None  # Señal incompleta sin Stop Loss
+
+        sl_str = sl_match.group(1).strip().replace(',', '.').strip('.')
 
         # 5. Take Profits (TP1 .. TP5)
         tps = []
         tp_emojis = ['🥇', '🥈', '🥉', '🎖️', '🚀']
         for i in range(1, 6):
-            tp_m = re.search(rf'TP\s*{i}[:\s]*([0-9\.,]+)', text, re.I)
+            tp_m = re.search(rf'TP\s*{i}\s*[:\s]*([0-9\.,]+)', text, re.I)
             if tp_m:
                 val = tp_m.group(1).strip().replace(',', '.').strip('.')
                 emoji = tp_emojis[i-1] if i-1 < len(tp_emojis) else '🎯'
                 tps.append(f"{emoji} **TP{i}:** {val}")
 
-        # 6. Confianza IA / ML
-        conf_match = re.search(r'(?:aprendizaje\s*automático|machine\s*learning|ml\s*score|confianza|confidence)[:\s]*(\d+)', text, re.I)
+        if not tps:
+            return None  # Señal incompleta sin objetivos de TP
+
+        # 6. Confianza IA / ML (prioriza Machine Learning score, luego Direction Confidence)
+        conf_match = re.search(r'machine\s*learning\s*(?:score)?[:\s]*(\d+)', text, re.I)
+        if not conf_match:
+            conf_match = re.search(r'(?:aprendizaje\s*automático|ml\s*score|direction\s*confidence|confidence|confianza)[:\s]*(\d+)', text, re.I)
         conf_str = f"{conf_match.group(1)}%" if conf_match else None
 
         # Ensamblar mensaje estilo CLUB 10M
@@ -1373,11 +1387,7 @@ class TelegramReplicator:
             "",
             "🎯 **OBJETIVOS:**"
         ]
-        if tps:
-            lines.extend(tps)
-        else:
-            lines.append("🥇 **TP1:** Abierto")
-
+        lines.extend(tps)
         if conf_str:
             lines.append("")
             lines.append(f"🤖 **CONFIANZA IA:** {conf_str}")
@@ -1659,7 +1669,10 @@ class TelegramReplicator:
                 prefix = f"**REENVIADO POR {clean_prefix}**"
 
             use_gem = self.is_gemini_enabled(config)
-            if config.get('club10_style') and neural_club10_text:
+            if config.get('club10_style'):
+                if not neural_club10_text:
+                    logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO para {dest_id} - No contiene estructura completa de señal (Entrada, SL o TP).")
+                    continue
                 dest_final_text = neural_club10_text
             else:
                 dest_final_text = gemini_text if use_gem else standard_text
