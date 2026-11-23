@@ -1806,6 +1806,12 @@ class TelegramReplicator:
                     logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener términos prohibidos (VIP OPEN / cupos / slots / pagos / pool).")
                     continue
 
+            # Anteponer encabezado/título personalizado (ej: 👑 CLUB 10M | SEÑAL VIP 👑) si está configurado
+            header = config.get('header') or config.get('custom_header')
+            if header and dest_final_text:
+                if not dest_final_text.startswith(header):
+                    dest_final_text = f"{header}\n\n{dest_final_text}"
+
             # Anteponer prefijo al texto si está definido
             text_to_send = f"{prefix}\n\n{dest_final_text}".strip() if prefix and dest_final_text else dest_final_text
 
@@ -1893,6 +1899,10 @@ class TelegramReplicator:
                     if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS)\b', dest_upper):
                         logger.info(f"Edit: Msg {msg_id} edición descartada tras traducción por contener términos prohibidos.")
                         continue
+
+                header = mapping.get('header', '')
+                if header and final_text and not final_text.startswith(header):
+                    final_text = f"{header}\n\n{final_text}"
 
                 text_to_send = f"{prefix}\n\n{final_text}".strip() if prefix and final_text else final_text
 

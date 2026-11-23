@@ -55,7 +55,7 @@ REPLICATION_MAP = {
             "refresh_button_text": "REFRESH",
             "target_timeframe_button": "H1",
             "target_asset_button": "XAUUSD",
-            "club10_style": True,
+            "header": "👑 **CLUB 10M | SEÑAL VIP** 👑",
             "skip_promo_filters": True,
             "incoming_only": True
         }
