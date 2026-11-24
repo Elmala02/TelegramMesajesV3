@@ -785,7 +785,42 @@ class TelegramReplicator:
                     return (r_idx, c_idx, btn_text)
         return None
 
-    async def _trigger_refresh_once(self, source_key, refresh_cfgs, reason="Auto-Refresh"):
+    def _validate_mind_quality(self, text: str, config: dict) -> tuple:
+        """Verifica si la señal de NeuralTrade/Mind cumple con el indicador verde y la confianza mínima."""
+        if not text:
+            return False, "Texto vacío"
+
+        first_lines = "\n".join(text.strip().splitlines()[:3]).upper()
+        if config.get('require_green_indicator'):
+            has_green = '🟢' in first_lines or 'CONDICIONES CUMPLIDAS' in first_lines
+            is_yellow = '🟡' in first_lines or 'WITHIN LIMITS' in first_lines or 'DENTRO DE LÍMITES' in first_lines or 'DENTRO DE LIMITES' in first_lines
+            if is_yellow or not has_green:
+                det = "🟡 (Amarillo)" if is_yellow else "sin botón 🟢"
+                return False, f"Indicador no es verde (detectado: {det})"
+
+        min_conf = config.get('min_direction_confidence')
+        if min_conf is not None:
+            conf_m = re.search(r'(?:Direction\s*Confidence|Confianza\s*en\s*la\s*direcci[óo]n)[:\s]*(\d+)', text, re.I)
+            if not conf_m:
+                return False, "No se detectó porcentaje de 'Direction Confidence'"
+            conf_val = int(conf_m.group(1))
+            if conf_val < min_conf:
+                return False, f"Confianza de dirección {conf_val}% es menor al mínimo requerido ({min_conf}%)"
+
+        return True, "Cumple indicador verde y confianza requerida"
+
+    def _get_timeframe_for_minute(self, minute: int) -> str:
+        """Determina la temporalidad según el minuto de la hora (:00 -> H1, :15 -> M15, :30 -> M30, :45 -> M15)."""
+        if 53 <= minute or minute < 8:
+            return "H1"
+        elif 8 <= minute < 23:
+            return "M15"
+        elif 23 <= minute < 38:
+            return "M30"
+        else: # 38 <= minute < 53
+            return "M15"
+
+    async def _trigger_refresh_once(self, source_key, refresh_cfgs, reason="Auto-Refresh", override_tf=None):
         """Hace clic en el botón REFRESH del último mensaje del bot (asegurando activo y temporalidad) y garantiza envío."""
         source_name = refresh_cfgs[0].get('name', str(source_key))
         btn_keyword = str(refresh_cfgs[0].get('refresh_button_text', 'REFRESH')).upper()
@@ -825,8 +860,8 @@ class TelegramReplicator:
                     except Exception as e_asset:
                         logger.warning(f"{reason} ({source_name}): Aviso al seleccionar {target_asset}: {e_asset}")
 
-        # 2. Asegurar Temporalidad (ej: H1) si está configurada
-        target_tf = refresh_cfgs[0].get('target_timeframe_button')
+        # 2. Asegurar Temporalidad (ej: H1, M15, M30) si está configurada o solicitada por ciclo
+        target_tf = override_tf or refresh_cfgs[0].get('target_timeframe_button')
         if target_tf:
             txt_now = (target_msg.text or "").upper()
             if not re.search(rf'\({re.escape(target_tf)}\)', txt_now):
@@ -885,6 +920,67 @@ class TelegramReplicator:
             priority = valid_configs[0].get('priority', 99)
             await self.process_message(msg_to_send, priority, valid_configs)
 
+    async def _timeframe_cycle_loop(self, source_key, cycle_cfgs):
+        """Ejecuta el ciclo de temporalidades (:00 -> H1, :15 -> M15, :30 -> M30, :45 -> M15) sincronizado al reloj."""
+        source_name = cycle_cfgs[0].get('name', str(source_key))
+        logger.info(
+            f"Timeframe-Cycle: Iniciado para {source_name} "
+            f"(:00 -> H1, :15 -> M15, :30 -> M30, :45 -> M15)."
+        )
+
+        # Disparo inicial tras 4s para calibrar temporalidad del minuto actual
+        try:
+            await asyncio.sleep(4)
+            now_dt = datetime.now()
+            init_tf = self._get_timeframe_for_minute(now_dt.minute)
+            logger.info(f"Timeframe-Cycle ({source_name}): Disparo inicial calibrando temporalidad {init_tf}...")
+            await self._trigger_refresh_once(source_key, cycle_cfgs, reason=f"Cycle-Init ({init_tf})", override_tf=init_tf)
+        except asyncio.CancelledError:
+            return
+        except Exception as e_init:
+            logger.warning(f"Timeframe-Cycle ({source_name}): Aviso en ciclo inicial: {e_init}")
+
+        while True:
+            try:
+                # Calcular tiempo exacto hasta el siguiente cuarto de hora (:00, :15, :30, :45)
+                now_dt = datetime.now()
+                sec_in_hour = now_dt.minute * 60 + now_dt.second + (now_dt.microsecond / 1_000_000.0)
+                checkpoints = [0, 900, 1800, 2700, 3600]
+                next_cp = None
+                for cp in checkpoints:
+                    if cp > sec_in_hour + 2.0:
+                        next_cp = cp
+                        break
+                if next_cp is None:
+                    next_cp = 3600
+
+                sleep_seconds = max(5.0, next_cp - sec_in_hour)
+                target_min = int((next_cp % 3600) / 60)
+                next_tf = self._get_timeframe_for_minute(target_min)
+                logger.info(
+                    f"Timeframe-Cycle ({source_name}): Próxima consulta a las :{target_min:02d} ({next_tf}) "
+                    f"en {sleep_seconds:.1f} segundos."
+                )
+
+                await asyncio.sleep(sleep_seconds)
+
+                # Llegamos al checkpoint: determinar temporalidad y disparar refresh
+                cur_dt = datetime.now()
+                target_tf = self._get_timeframe_for_minute(cur_dt.minute)
+                logger.info(f"Timeframe-Cycle ({source_name}): Ejecutando consulta de :{cur_dt.minute:02d} para {target_tf}...")
+                await self._trigger_refresh_once(
+                    source_key, 
+                    cycle_cfgs, 
+                    reason=f"Timeframe-Cycle ({target_tf})", 
+                    override_tf=target_tf
+                )
+            except asyncio.CancelledError:
+                logger.info(f"Timeframe-Cycle ({source_name}): Tarea cancelada.")
+                break
+            except Exception as e:
+                logger.error(f"Timeframe-Cycle ({source_name}): Error en ciclo: {e}")
+                await asyncio.sleep(30)
+
     async def _auto_refresh_loop(self, source_key, refresh_cfgs, interval_minutes: float):
         """Presiona automáticamente el botón REFRESH en bots interactivos cada N minutos."""
         interval_seconds = max(60, int(interval_minutes * 60))
@@ -926,7 +1022,9 @@ class TelegramReplicator:
         if unresolved_str_sources:
             logger.warning(f"Unresolved string sources (fallback por username): {sorted(unresolved_str_sources)}")
 
-        # Recolectar fuentes con auto-refresh (deduplicadas por objeto de configuración)
+        # Recolectar fuentes con auto-refresh y con timeframe-cycle (deduplicadas por objeto de configuración)
+        cycle_targets = []
+        started_cycle_keys = set()
         refresh_targets = []
         started_refresh_keys = set()
         for src_key, cfgs in self.replication_map.items():
@@ -935,7 +1033,15 @@ class TelegramReplicator:
             ):
                 continue
             cfg_list = cfgs if isinstance(cfgs, list) else [cfgs]
-            refresh_cfgs = [c for c in cfg_list if c.get('auto_refresh_minutes')]
+
+            # 1. Ciclo de temporalidades por hora (:00 H1, :15 M15, :30 M30, :45 M15)
+            cycle_cfgs = [c for c in cfg_list if c.get('timeframe_cycle')]
+            if cycle_cfgs and src_key not in started_cycle_keys:
+                started_cycle_keys.add(src_key)
+                cycle_targets.append((src_key, cycle_cfgs))
+
+            # 2. Auto-refresh regular si no usa timeframe_cycle
+            refresh_cfgs = [c for c in cfg_list if c.get('auto_refresh_minutes') and not c.get('timeframe_cycle')]
             if refresh_cfgs and src_key not in started_refresh_keys:
                 started_refresh_keys.add(src_key)
                 interval_min = min(float(c['auto_refresh_minutes']) for c in refresh_cfgs)
@@ -946,10 +1052,14 @@ class TelegramReplicator:
         async def handler(event):
             # Comando manual instantáneo: escribir /refresh o !refresh desde tu cuenta fuerza el refresh + envío
             raw_txt = (event.message.text or "").strip().lower()
-            if getattr(event.message, 'out', False) and raw_txt in ("/refresh", "!refresh") and refresh_targets:
+            if getattr(event.message, 'out', False) and raw_txt in ("/refresh", "!refresh") and (refresh_targets or cycle_targets):
                 logger.info(f"Manual-Refresh: Comando '{raw_txt}' detectado. Ejecutando refresh inmediato...")
                 for src_key, refresh_cfgs, _ in refresh_targets:
                     asyncio.create_task(self._trigger_refresh_once(src_key, refresh_cfgs, reason="Manual-Refresh"))
+                for src_key, cycle_cfgs in cycle_targets:
+                    now = datetime.now()
+                    tf = self._get_timeframe_for_minute(now.minute)
+                    asyncio.create_task(self._trigger_refresh_once(src_key, cycle_cfgs, reason=f"Manual-Refresh ({tf})", override_tf=tf))
                 return
 
             if event.chat_id not in resolved_int_sources and not unresolved_str_sources:
@@ -1017,6 +1127,10 @@ class TelegramReplicator:
         # Lanzar tareas de Auto-Refresh para bots interactivos configurados
         for src_key, refresh_cfgs, interval_min in refresh_targets:
             asyncio.create_task(self._auto_refresh_loop(src_key, refresh_cfgs, interval_min))
+
+        # Lanzar tareas de Ciclo de Temporalidades (:00 H1, :15 M15, :30 M30, :45 M15)
+        for src_key, cycle_cfgs in cycle_targets:
+            asyncio.create_task(self._timeframe_cycle_loop(src_key, cycle_cfgs))
 
         logger.info("CLUB 10M Multi-Source Replicator Running...")
         await self.client.run_until_disconnected()
@@ -1775,6 +1889,14 @@ class TelegramReplicator:
                 if clean_prefix.startswith("REENVIADO POR "):
                     clean_prefix = clean_prefix.replace("REENVIADO POR ", "", 1)
                 prefix = f"**REENVIADO POR {clean_prefix}**"
+
+            # Filtro de calidad Mind / NeuralTrade (Botón verde + Confianza mínima)
+            if config.get('require_green_indicator') or config.get('min_direction_confidence'):
+                is_valid, q_reason = self._validate_mind_quality(original_text or text_filtered, config)
+                if not is_valid:
+                    logger.info(f"Pipeline: Msg {msg_id} DESCARTADO para {dest_id} por filtro Mind: {q_reason}.")
+                    continue
+                logger.info(f"Pipeline: Msg {msg_id} APROBADO para {dest_id} por filtro Mind ({q_reason}).")
 
             use_gem = self.is_gemini_enabled(config)
             if config.get('club10_style'):
