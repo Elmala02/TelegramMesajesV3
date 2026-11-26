@@ -72,6 +72,13 @@ REPLICATION_MAP = {
     ],
     -1001484000474: [
         {"dest": -1004457486115, "name": "BALANCE ÉLITE ⚖️👑", "priority": 1, "allow_media": False}
+    ],
+    -1002096377970: [
+        {"dest": -1005635704425, "name": "MASTER TRADE⚡", "priority": 1, "allow_media": True}
+    ],
+    -1002851894907: [
+        {"dest": -1005760224527, "name": "GOLD VAULT 🏦🟡", "priority": 1, "allow_media": True},
+        {"dest": -1005791596852, "name": "NITRO FX 🔥📈", "priority": 1, "allow_media": False}
     ]
 }
 
