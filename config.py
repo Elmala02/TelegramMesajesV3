@@ -95,6 +95,6 @@ PROMO_TRIGGERS = [
     "registration", "account", "broker", "invest", "profit share",
     "billetera", "pagos", "participantes", "wallet", "wallets",
     "vip open", "cupo", "cupos", "slot", "slots", "tragamonedas",
-    "pool", "pools", "poll", "polls", "vantage"
+    "pool", "pools", "poll", "polls"
 ]
 
