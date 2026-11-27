@@ -79,6 +79,9 @@ REPLICATION_MAP = {
     -1002851894907: [
         {"dest": -1005760224527, "name": "GOLD VAULT 🏦🟡", "priority": 1, "allow_media": True},
         {"dest": -1005791596852, "name": "NITRO FX 🔥📈", "priority": 1, "allow_media": False}
+    ],
+    -1001848807486: [
+        {"dest": -1006063220121, "name": "V8 GOLD 🏎️💨", "priority": 1, "allow_media": True, "allow_video": False}
     ]
 }
 

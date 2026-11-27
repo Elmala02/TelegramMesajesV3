@@ -1779,6 +1779,15 @@ class TelegramReplicator:
         logger.warning("Gemini: Todos los modelos de IA fallaron o no están disponibles. Mensaje NO será traducido (grupos Gemini no usan Google Translate).")
         return None
 
+    def _is_video_message(self, message: Message) -> bool:
+        """Determina si el mensaje contiene un video, nota de video o documento con formato de video."""
+        if getattr(message, 'video', None) or getattr(message, 'video_note', None):
+            return True
+        doc = getattr(message, 'document', None)
+        if doc and (getattr(doc, 'mime_type', '') or '').startswith('video/'):
+            return True
+        return False
+
     def _contains_bot_commands(self, text: str) -> bool:
         """Detecta comandos de Telegram (/signal, /start, /help, etc.) o menciones a comandos."""
         if not text:
@@ -1797,8 +1806,12 @@ class TelegramReplicator:
         msg_id = message.id
         original_text = self.normalize_text(message.text or "")
         
-        # Verificar si al menos un destino permite multimedia si no hay texto
-        any_media_allowed = any(c.get('allow_media') for c in configs)
+        # Verificar si al menos un destino permite multimedia si no hay texto (respetando exclusión de videos)
+        is_video = self._is_video_message(message)
+        any_media_allowed = any(
+            c.get('allow_media') and not (is_video and c.get('allow_video') is False)
+            for c in configs
+        )
         if not original_text and not (message.media and any_media_allowed):
             return
 
@@ -1937,8 +1950,13 @@ class TelegramReplicator:
             # Anteponer prefijo al texto si está definido
             text_to_send = f"{prefix}\n\n{dest_final_text}".strip() if prefix and dest_final_text else dest_final_text
 
-            # Si el destino no permite media y el mensaje es solo media, saltar
-            if not text_to_send and not (message.media and allow_media):
+            # Comprobar restricciones multimedia (ej: allow_media=True pero allow_video=False)
+            allow_video = config.get('allow_video', True)
+            media_allowed_for_dest = allow_media and not (is_video and allow_video is False)
+            file_to_send = message.media if media_allowed_for_dest else None
+
+            # Si el destino no permite este archivo multimedia y el mensaje es solo media (sin texto), saltar
+            if not text_to_send and not file_to_send:
                 continue
 
             try:
@@ -1946,7 +1964,7 @@ class TelegramReplicator:
                     dest_id, 
                     text_to_send, 
                     reply_to=topic_id,
-                    file=message.media if allow_media else None
+                    file=file_to_send
                 )
                 engine_name = "Gemini IA" if use_gem else "Estándar"
                 logger.info(f"Pipeline: SUCCESS - Msg {msg_id} enviado a {dest_id} [{engine_name}, prefix='{prefix}'].")
