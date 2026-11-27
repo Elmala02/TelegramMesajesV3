@@ -297,6 +297,11 @@ class TelegramReplicator:
             logger.info("Filtro: Mensaje descartado por contener VIP OPEN, cupos, slots o tragamonedas.")
             return None
 
+        # 1.3 DESCARTE: Broker Vantage (Señor Sniper y general)
+        if re.search(r'\bVANTAGE\b', text_upper):
+            logger.info(f"Filtro: Mensaje descartado por contener mención al broker VANTAGE ({source_name}).")
+            return None
+
         # Si es una señal de trading explícita, OMITIR los descartes de reuniones/VIP/redes sociales
         if not is_explicit_signal:
             # 2. DESCARTE: Reuniones/Clases/Transmisiones/En Vivo (FXKINGS o similar) - Inglés y Español
@@ -1937,8 +1942,8 @@ class TelegramReplicator:
             # Descarte de seguridad post-traducción (VIP OPEN, cupos, slots, tragamonedas, etc.)
             if dest_final_text and not config.get('skip_promo_filters', False):
                 dest_upper = dest_final_text.upper()
-                if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS)\b', dest_upper):
-                    logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener términos prohibidos (VIP OPEN / cupos / slots / pagos / pool).")
+                if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS|VANTAGE)\b', dest_upper):
+                    logger.info(f"Pipeline: Mensaje {msg_id} DESCARTADO tras traducción por contener términos prohibidos (VIP OPEN / cupos / slots / pagos / pool / Vantage).")
                     continue
 
             # Anteponer encabezado/título personalizado (ej: 👑 CLUB 10M | SEÑAL VIP 👑) si está configurado
@@ -2036,8 +2041,8 @@ class TelegramReplicator:
                 # Descarte de seguridad post-traducción en ediciones
                 if final_text:
                     dest_upper = final_text.upper()
-                    if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS)\b', dest_upper):
-                        logger.info(f"Edit: Msg {msg_id} edición descartada tras traducción por contener términos prohibidos.")
+                    if re.search(r'\bVIP\s+OPEN\b', dest_upper) or re.search(r'\b(CUPO|CUPOS|SLOT|SLOTS|TRAGAMONEDAS|BILLETERA|BILLETERAS|PAGO|PAGOS|PARTICIPANTE|PARTICIPANTES|WALLET|WALLETS|POOL|POOLS|POLL|POLLS|VANTAGE)\b', dest_upper):
+                        logger.info(f"Edit: Msg {msg_id} edición descartada tras traducción por contener términos prohibidos (Vantage / otros).")
                         continue
 
                 header = mapping.get('header', '')

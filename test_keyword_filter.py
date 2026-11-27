@@ -25,6 +25,8 @@ def test_filters_and_sanitizer():
         ("Abriendo tragamonedas gratuitas ahora", False),
         ("VIP OPEN 💎 mensaje para acceder", False),
         ("Todos los que piden VIP, estoy abriendo tragamonedas gratuitas, vamos 🚀\nVIP OPEN 💎\nMensaje para acceder👇\n@josejaqueoficial", False),
+        ("Regístrate en Vantage broker para operar con spread bajo", False),
+        ("Opere en Vantage con nuestra cuenta recomendada", False),
         ("MENSAJE NORMAL DE TRADING GOLD BUY 2600", True),
     ]
     
